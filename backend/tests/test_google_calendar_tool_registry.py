@@ -103,7 +103,7 @@ def test_tool_registry_executes_real_google_calendar_with_current_tenant():
     db = object()
     registry.register(GoogleCalendarToolAdapter(db, service_factory=FakeService))
 
-    result = registry.execute("google_calendar", "google_calendar_list_events", {"max_results": 1}, ToolContext(tenant_id=tenant_id))
+    result = registry.execute("google_calendar", "google_calendar_list_events", {"max_results": 1}, ToolContext(tenant_id=tenant_id, integration_connection_id=uuid.uuid4()))
 
     assert result.ok is True
     assert calls == [(db, tenant_id)]
@@ -136,11 +136,23 @@ def test_create_event_rejects_empty_arguments_without_calling_service():
 
     registry = ToolRegistry()
     registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
-    result = registry.execute("google_calendar", "google_calendar_create_event", {}, ToolContext(tenant_id=uuid.uuid4()))
+    result = registry.execute("google_calendar", "google_calendar_create_event", {}, ToolContext(tenant_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()))
 
     assert result.ok is False
     assert result.error_code == "google_calendar_invalid_arguments"
     assert result.structured_content["error"] == "google_calendar_invalid_arguments"
+
+
+def test_calendar_operation_requires_server_validated_connection_binding():
+    result = GoogleCalendarToolAdapter(
+        object(), service_factory=lambda *_: (_ for _ in ()).throw(AssertionError("service must not run")),
+    ).execute(
+        "google_calendar_check_availability",
+        {"start": "2027-01-01T10:00:00Z", "end": "2027-01-01T11:00:00Z"},
+        ToolContext(tenant_id=uuid.uuid4()),
+    )
+    assert result.ok is False
+    assert result.error_code == "google_calendar_connection_required"
 
 
 def test_create_event_forwards_rendered_slot_arguments_unchanged():
@@ -162,7 +174,7 @@ def test_create_event_forwards_rendered_slot_arguments_unchanged():
     }
     registry = ToolRegistry()
     registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
-    result = registry.execute("google_calendar", "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4()))
+    result = registry.execute("google_calendar", "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()))
 
     assert result.ok is True
     assert calls == [arguments]
@@ -199,7 +211,7 @@ def _execute_identified_create(monkeypatch, *, tenant_id, contact_id, arguments=
     result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
         "google_calendar_create_event",
         payload,
-        ToolContext(tenant_id=tenant_id, contact_id=contact_id),
+        ToolContext(tenant_id=tenant_id, contact_id=contact_id, integration_connection_id=uuid.uuid4()),
     )
     return result, calls
 
@@ -274,7 +286,7 @@ def test_identified_create_fails_closed_before_service_when_secret_is_invalid(mo
     result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
         "google_calendar_create_event",
         {"start": "2026-12-01T10:00:00Z", "end": "2026-12-01T11:00:00Z"},
-        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
 
     assert result.ok is False
@@ -296,7 +308,7 @@ def test_legacy_create_without_contact_remains_unmanaged(monkeypatch):
 
     arguments = {"start": "2026-12-01T10:00:00Z", "end": "2026-12-01T11:00:00Z"}
     result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
-        "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4()),
+        "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
 
     assert result.ok is True
@@ -336,7 +348,7 @@ def test_update_event_rejects_each_missing_required_argument_without_calling_ser
 
     result = registry.execute(
         "google_calendar", "google_calendar_update_event", arguments,
-        ToolContext(tenant_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
 
     assert result.ok is False
@@ -371,7 +383,7 @@ def test_update_event_calls_existing_event_and_returns_canonical_success(monkeyp
 
     result = registry.execute(
         "google_calendar", "google_calendar_update_event", arguments,
-        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
 
     assert result.ok is True
@@ -396,7 +408,7 @@ def test_update_event_returns_structured_error_from_service_failure(monkeypatch)
     registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
     result = registry.execute("google_calendar", "google_calendar_update_event", {
         "event_id": "missing", "start": "2026-09-10T10:00:00Z", "end": "2026-09-10T11:00:00Z",
-    }, ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()))
+    }, ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()))
 
     assert result.ok is False
     assert result.error_code == "google_calendar_api_error"
@@ -417,14 +429,14 @@ def test_update_event_requires_trusted_contact_and_secret_before_service(monkeyp
 
     missing_contact = registry.execute(
         "google_calendar", "google_calendar_update_event", args,
-        ToolContext(tenant_id=tenant_id),
+        ToolContext(tenant_id=tenant_id, integration_connection_id=uuid.uuid4()),
     )
     assert missing_contact.error_code == "google_calendar_contact_identity_required"
 
     monkeypatch.delenv("EXTERNAL_IDENTITY_SECRET", raising=False)
     missing_secret = registry.execute(
         "google_calendar", "google_calendar_update_event", args,
-        ToolContext(tenant_id=tenant_id, contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=tenant_id, contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
     assert missing_secret.error_code == "google_calendar_external_identity_unavailable"
 
@@ -441,7 +453,7 @@ def test_update_event_rejects_identity_and_calendar_spoofing_before_service(monk
             "tenant_id": str(uuid.uuid4()), "asa_patient_ref": "fake",
             "asa_managed": False, "calendar_id": "attacker@example.com",
         },
-        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
     assert result.error_code == "google_calendar_invalid_arguments"
 
@@ -491,7 +503,7 @@ def test_find_managed_appointments_filters_untrusted_results_and_returns_minimal
     result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
         "google_calendar_find_managed_appointments",
         {"start": "2026-10-01T00:00:00-03:00", "end": "2026-10-31T23:59:00-03:00", "timezone": "America/Sao_Paulo"},
-        ToolContext(tenant_id=tenant_id, contact_id=contact_id),
+        ToolContext(tenant_id=tenant_id, contact_id=contact_id, integration_connection_id=uuid.uuid4()),
     )
 
     assert result.ok is True
@@ -518,7 +530,7 @@ def test_find_managed_appointments_rejects_invalid_window_before_google(monkeypa
         object(), service_factory=lambda *_: (_ for _ in ()).throw(AssertionError("Google must not be called")),
     ).execute(
         "google_calendar_find_managed_appointments", arguments,
-        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
     assert result.ok is False
     assert result.error_code == code
@@ -528,13 +540,13 @@ def test_find_managed_appointments_requires_contact_and_secret_before_google(mon
     arguments = {"start": "2026-10-01T00:00:00Z", "end": "2026-10-02T00:00:00Z"}
     factory = lambda *_: (_ for _ in ()).throw(AssertionError("Google must not be called"))
     missing_contact = GoogleCalendarToolAdapter(object(), service_factory=factory).execute(
-        "google_calendar_find_managed_appointments", arguments, ToolContext(tenant_id=uuid.uuid4()),
+        "google_calendar_find_managed_appointments", arguments, ToolContext(tenant_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
     assert missing_contact.error_code == "google_calendar_contact_identity_required"
     monkeypatch.delenv("EXTERNAL_IDENTITY_SECRET", raising=False)
     missing_secret = GoogleCalendarToolAdapter(object(), service_factory=factory).execute(
         "google_calendar_find_managed_appointments", arguments,
-        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), integration_connection_id=uuid.uuid4()),
     )
     assert missing_secret.error_code == "google_calendar_external_identity_unavailable"
 

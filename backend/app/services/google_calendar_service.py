@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -66,12 +67,10 @@ def _connection_lookup_diagnostics(tenant_id: uuid.UUID | str, provider: str = P
 
 
 def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
-    metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
     return {
         "connection_id": str(conn.id) if conn else None,
         "connection_tenant_id": str(conn.tenant_id) if conn else None,
-        "account_email": metadata.get("account_email"),
-        "calendar_id": metadata.get("calendar_id") or "primary",
+        "calendar_id_hash": _calendar_id_for_log(resolve_calendar_id(conn)),
         "provider": conn.provider if conn else PROVIDER,
         "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
         "status": conn.status if conn else None,
@@ -82,11 +81,32 @@ def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
     }
 
 
+def resolve_calendar_id(conn: IntegrationConnection | None) -> str:
+    """Resolve the calendar from the exact credential-bearing connection."""
+    metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+    value = metadata.get("calendar_id")
+    return str(value).strip() if value is not None and str(value).strip() else "primary"
+
+
+def _calendar_id_for_log(calendar_id: str) -> str:
+    """Keep potentially email-shaped calendar ids out of logs."""
+    if calendar_id == "primary":
+        return calendar_id
+    return f"sha256:{hashlib.sha256(calendar_id.encode()).hexdigest()[:12]}"
+
+
 class GoogleCalendarService:
-    def __init__(self, db: Session, tenant_id: uuid.UUID | str):
+    def __init__(
+        self, db: Session, tenant_id: uuid.UUID | str,
+        integration_connection_id: uuid.UUID | str | None = None,
+    ):
         self.db = db
         self.tenant_id = uuid.UUID(str(tenant_id))
         self.connection_service = IntegrationConnectionService(db)
+        self.integration_connection_id = (
+            uuid.UUID(str(integration_connection_id))
+            if integration_connection_id is not None else None
+        )
 
     def _log(self, event: str, *, tool_name: str | None = None, input: Any = None, conn: IntegrationConnection | None = None, calendar_id: str | None = None, exception: BaseException | None = None, **extra: Any) -> None:
         payload = {
@@ -98,7 +118,7 @@ class GoogleCalendarService:
             **extra,
         }
         if calendar_id:
-            payload["calendar_id"] = calendar_id
+            payload["calendar_id_hash"] = _calendar_id_for_log(calendar_id)
         if exception is not None:
             payload.update({
                 "exception_class": type(exception).__name__,
@@ -110,8 +130,23 @@ class GoogleCalendarService:
             logger.info("%s %s", event, sanitize_metadata(payload))
 
     def _connection(self, *, tool_name: str | None = None, input: Any = None) -> IntegrationConnection | None:
-        self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name, input=input, **_connection_lookup_diagnostics(self.tenant_id, PROVIDER, active_only=True))
-        conn = self.connection_service.get_active_connection(self.tenant_id, PROVIDER)
+        if self.integration_connection_id is not None:
+            conn = self.db.execute(select(IntegrationConnection).where(
+                IntegrationConnection.id == self.integration_connection_id,
+                IntegrationConnection.tenant_id == self.tenant_id,
+                IntegrationConnection.provider == PROVIDER,
+                IntegrationConnection.status == "active",
+            )).scalars().first()
+            self._log(
+                "GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name,
+                input=input, integration_connection_id=str(self.integration_connection_id),
+                binding_mode="exact",
+            )
+        else:
+            # Explicitly isolated compatibility path for callers predating Flow
+            # integration bindings. Runtime/tool execution never uses it.
+            self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name, input=input, **_connection_lookup_diagnostics(self.tenant_id, PROVIDER, active_only=True), binding_mode="legacy")
+            conn = self.connection_service.get_active_connection(self.tenant_id, PROVIDER)
         if not conn or conn.auth_type != "oauth2":
             self._log("GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tool_name=tool_name, input=input, conn=conn)
             return None
@@ -153,7 +188,7 @@ class GoogleCalendarService:
 
     def _tenant_timezone(self, explicit: str | None = None) -> str:
         candidates = [explicit]
-        conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+        conn = self._connection(tool_name="resolve_timezone")
         metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
         candidates += [metadata.get("timezone"), metadata.get("time_zone")]
         for item in candidates:
@@ -166,10 +201,8 @@ class GoogleCalendarService:
         return DEFAULT_TIMEZONE
 
     def _trusted_calendar_id(self) -> str:
-        """Resolve the calendar solely from the tenant's integration connection."""
-        conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
-        metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
-        return str(metadata.get("calendar_id") or "primary")
+        """Resolve the calendar solely from the selected integration connection."""
+        return resolve_calendar_id(self._connection(tool_name="resolve_calendar_id"))
 
     def _normalize_datetime(self, value: Any, tz_name: str) -> str | None:
         if value in (None, ""):
@@ -282,7 +315,7 @@ class GoogleCalendarService:
                     error_description=error_description,
                 )
                 if is_google_auth_error(resp.status_code, response_json, error):
-                    self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                    self._revoke_connection(conn)
                     return {"ok": False, "message": "google_calendar_refresh_invalid_grant", "user_message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": response_json}
                 if error == "invalid_client":
                     return {"ok": False, "message": "google_calendar_refresh_invalid_client", "user_message": "Credenciais OAuth do Google Calendar inválidas. Verifique GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET."}
@@ -294,7 +327,12 @@ class GoogleCalendarService:
             if not access:
                 return {"ok": False, "message": "Resposta de renovação do Google Calendar sem access_token."}
             expires_at = _now_utc_naive() + timedelta(seconds=int(data.get("expires_in") or 3600))
-            self.connection_service.update_tokens(tenant_id=self.tenant_id, provider=PROVIDER, access_token=access, expires_at=expires_at)
+            conn.access_token_encrypted = self.connection_service.encrypt_credential(access)
+            conn.expires_at = expires_at
+            conn.status = "active"
+            conn.updated_at = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(conn)
             return {"ok": True, "refreshed": True}
         except requests.RequestException as exc:
             self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name="refresh_access_token", input={"force": force}, conn=conn, exception=exc)
@@ -372,7 +410,7 @@ class GoogleCalendarService:
                 response_payload["body"] = getattr(resp, "text", None)
             self._log("GOOGLE_CALENDAR_API_ERROR", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, **response_payload)
             if is_google_auth_error(resp.status_code, response_payload.get("body")):
-                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                self._revoke_connection(conn)
                 return False, {"message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": response_payload.get("body")}, resp.status_code
             return False, {"message": "Erro ao chamar Google Calendar.", "status_code": resp.status_code, "api_error": response_payload.get("body")}, resp.status_code
         try:
@@ -384,8 +422,7 @@ class GoogleCalendarService:
         return True, data, resp.status_code
 
     def _service_call(self, tool_name: str, input: dict[str, Any], operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-        self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name, input=input, **_connection_lookup_diagnostics(self.tenant_id, PROVIDER))
-        conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+        conn = self._connection(tool_name=tool_name, input=input)
         self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_LOADED", tool_name=tool_name, input=input, conn=conn)
         self._log("GOOGLE_CALENDAR_SERVICE_CALL", tool_name=tool_name, input=input, conn=conn)
         try:
@@ -395,6 +432,17 @@ class GoogleCalendarService:
             raise
         self._log("GOOGLE_CALENDAR_SERVICE_RESULT", tool_name=tool_name, input=input, conn=conn, result=result)
         return result
+
+    def _revoke_connection(self, conn: IntegrationConnection) -> None:
+        """Revoke only the connection whose credentials failed."""
+        conn.status = "revoked"
+        conn.access_token_encrypted = None
+        conn.refresh_token_encrypted = None
+        conn.api_key_encrypted = None
+        conn.expires_at = None
+        conn.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(conn)
 
     def list_events(self, **kwargs: Any) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
@@ -501,9 +549,10 @@ class GoogleCalendarService:
                         return {"ok": False, "message": "calendar_past_date_requires_confirmation", "start": start_dt.isoformat(), "timezone": tz}
                 except Exception:
                     pass
+            calendar_id = self._trusted_calendar_id()
             ok, data, _ = self._request(
                 "POST",
-                "/calendars/primary/events",
+                f"/calendars/{quote(calendar_id, safe='')}/events",
                 json_body=self._event_payload(
                     kwargs,
                     asa_private_metadata=asa_private_metadata,
@@ -579,21 +628,22 @@ class GoogleCalendarService:
             tz = self._tenant_timezone(kwargs.get("timezone"))
             start = kwargs.get("start") or kwargs.get("timeMin") or kwargs.get("time_min")
             end = kwargs.get("end") or kwargs.get("timeMax") or kwargs.get("time_max")
-            body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": "primary"}]}
-            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_REQUEST", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", request_body=body, **auth_trace)
+            calendar_id = self._trusted_calendar_id()
+            body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": calendar_id}]}
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_REQUEST", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id=calendar_id, request_body=body, **auth_trace)
             ok, data, _ = self._request("POST", "/freeBusy", json_body=body, auth_trace=auth_trace)
-            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_AUTH_READY", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", **auth_trace)
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_AUTH_READY", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id=calendar_id, **auth_trace)
             if not ok:
                 result = {"ok": False, **data}
-                self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", result=result, **auth_trace)
+                self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id=calendar_id, result=result, **auth_trace)
                 return result
-            busy = ((data.get("calendars") or {}).get("primary") or {}).get("busy") or []
+            busy = ((data.get("calendars") or {}).get(calendar_id) or {}).get("busy") or []
             from app.services.appointment_policy_service import appointments_for_availability, policy_for_tenant
             policy = policy_for_tenant(self.db, self.tenant_id)
             mode = str(kwargs.get("mode") or "period")
             appointments = appointments_for_availability(start=body["timeMin"], end=body["timeMax"], timezone=tz, busy=busy, policy=policy, mode=mode, duration_minutes=kwargs.get("_effective_duration_minutes"))
             # Canonical availability contract: ToolResult.data is this object and appointments is its list.
             result = {"ok": True, "busy": busy, "appointments": appointments}
-            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", result=result, **auth_trace)
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id=calendar_id, result=result, **auth_trace)
             return result
         return self._service_call("google_calendar_check_availability", kwargs, operation)
