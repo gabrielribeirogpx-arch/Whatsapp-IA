@@ -12,7 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.flow_v2.publish_service import FlowV2PublishService
-from app.models import Flow, FlowVersion, MarketplaceTemplate, MarketplaceTemplateVersion
+from app.models import (
+    Flow,
+    FlowVersion,
+    MarketplaceInstallation,
+    MarketplaceInstallationResource,
+    MarketplaceTemplate,
+    MarketplaceTemplateVersion,
+)
+from app.models.audit_log import AuditLog
 
 STATUSES = {"draft", "preview_only", "published"}
 MODALITIES = {"Sem IA", "Híbrido", "IA Completa", "Sistema Completo"}
@@ -127,14 +135,113 @@ class OfficialMarketplaceTemplateService:
         self._access()
         version = self.db.scalar(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(MarketplaceTemplate.slug == slug, MarketplaceTemplateVersion.status == "published").order_by(MarketplaceTemplateVersion.created_at.desc()))
         if not version: raise LookupError("published_template_not_found")
-        nodes, edges, mapping = remap_graph(version.nodes_snapshot, version.edges_snapshot)
-        flow = Flow(tenant_id=self.tenant.id, name=version.template.name, description=version.template.description, runtime=version.manifest.get("runtime", "v2"), status="draft", nodes=nodes, edges=edges, nodes_json=nodes, edges_json=edges)
-        self.db.add(flow); self.db.flush()
-        result = FlowV2PublishService().publish_draft(self.db, tenant_id=self.tenant.id, flow_id=flow.id)
-        report = structural_diff(version.nodes_snapshot, version.edges_snapshot, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
-        if not report["equivalent"]: raise ValueError({"code": "installed_snapshot_diverged", "report": report})
-        self.db.commit()
-        return {"flow_id": str(flow.id), "flow_version_id": str(result.version.id), "template_version_id": str(version.id), "id_mapping": mapping, "validation": report, "post_install_route": f"/dashboard/flow-builder?flow_id={flow.id}"}
+        try:
+            nodes, edges, mapping = remap_graph(version.nodes_snapshot, version.edges_snapshot)
+            installation = MarketplaceInstallation(
+                tenant_id=self.tenant.id,
+                # These two legacy columns intentionally retain their textual
+                # slug/version semantics. Canonical UUIDs live on the resource.
+                template_id=version.template.slug,
+                template_slug=version.template.slug,
+                template_type="official_flow",
+                template_version=version.version,
+                automation_level="official",
+                variant=version.template.modality,
+                status="pending",
+                idempotency_key=f"official:{uuid.uuid4()}",
+                installed_by_user_id=self.user.id,
+                manifest_snapshot=copy.deepcopy(version.manifest),
+                dependency_snapshot=copy.deepcopy(version.dependencies or {}),
+                customization_state={},
+                created_resources={},
+            )
+            self.db.add(installation); self.db.flush()
+            flow = Flow(tenant_id=self.tenant.id, name=version.template.name, description=version.template.description, runtime=version.manifest.get("runtime", "v2"), status="draft", nodes=nodes, edges=edges, nodes_json=nodes, edges_json=edges)
+            self.db.add(flow); self.db.flush()
+            result = FlowV2PublishService().publish_draft(self.db, tenant_id=self.tenant.id, flow_id=flow.id)
+            report = structural_diff(version.nodes_snapshot, version.edges_snapshot, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
+            if not report["equivalent"]: raise ValueError({"code": "installed_snapshot_diverged", "report": report})
+            resource = MarketplaceInstallationResource(
+                installation_id=installation.id,
+                resource_type="flow",
+                resource_id=str(flow.id),
+                resource_name=flow.name,
+                creation_status="created",
+                metadata_json={
+                    "ownership": str(installation.id),
+                    "template_id": str(version.template_id),
+                    "template_version_id": str(version.id),
+                    "generated_flow_version_id": str(result.version.id),
+                },
+            )
+            self.db.add(resource)
+            installation.created_resources = {"flows": [str(flow.id)]}
+            installation.status = "completed"
+            installation.completed_at = datetime.utcnow()
+            self.db.add(AuditLog(
+                tenant_id=self.tenant.id,
+                user_id=self.user.id,
+                action="template_install_completed",
+                entity_type="marketplace_installation",
+                entity_id=str(installation.id),
+                metadata_json={
+                    "installation_id": str(installation.id),
+                    "template_id": str(version.template_id),
+                    "template_version_id": str(version.id),
+                    "flow_id": str(flow.id),
+                    "flow_version_id": str(result.version.id),
+                },
+            ))
+            self.db.commit()
+            return {"installation_id": str(installation.id), "flow_id": str(flow.id), "flow_version_id": str(result.version.id), "template_version_id": str(version.id), "id_mapping": mapping, "validation": report, "post_install_route": f"/dashboard/flow-builder?flow_id={flow.id}"}
+        except Exception:
+            # Installation, flow, initial version, provenance resource and audit
+            # record form one unit. Never retain a partially installed template.
+            self.db.rollback()
+            raise
+
+    def get_provenance(self, installation_id) -> dict:
+        """Resolve official provenance without guessing for legacy installations."""
+        installation = self.db.scalar(select(MarketplaceInstallation).where(
+            MarketplaceInstallation.id == installation_id,
+            MarketplaceInstallation.tenant_id == self.tenant.id,
+        ))
+        if installation is None:
+            raise LookupError("installation_not_found")
+        resource = next((item for item in installation.resources if item.resource_type == "flow"), None)
+        metadata = resource.metadata_json if resource and isinstance(resource.metadata_json, dict) else {}
+
+        def parsed_uuid(key):
+            try:
+                return uuid.UUID(str(metadata[key]))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return None
+
+        template_id = parsed_uuid("template_id")
+        template_version_id = parsed_uuid("template_version_id")
+        try:
+            flow_id = uuid.UUID(resource.resource_id) if resource else None
+        except (TypeError, ValueError, AttributeError):
+            flow_id = None
+        flow_version_id = parsed_uuid("generated_flow_version_id")
+        template = self.db.get(MarketplaceTemplate, template_id) if template_id else None
+        version = self.db.get(MarketplaceTemplateVersion, template_version_id) if template_version_id else None
+        flow = self.db.get(Flow, flow_id) if flow_id else None
+        flow_version = self.db.get(FlowVersion, flow_version_id) if flow_version_id else None
+        valid = bool(
+            template and version and flow and flow_version
+            and version.template_id == template.id
+            and flow.tenant_id == self.tenant.id
+            and flow_version.flow_id == flow.id
+        )
+        return {
+            "installation": installation,
+            "template": template if valid else None,
+            "template_version": version if valid else None,
+            "flow": flow if valid else None,
+            "generated_flow_version": flow_version if valid else None,
+            "legacy_or_unknown": not valid,
+        }
 
     def set_publication(self, version_id, publish: bool):
         self._access()
