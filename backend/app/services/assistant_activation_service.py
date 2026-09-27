@@ -87,19 +87,23 @@ def activate_assistant_configuration(
             activate_flow_exclusively(db=db, tenant_id=tenant_id, flow=flow)
             if not flow.is_active or flow.published_version_id != target.id:
                 raise HTTPException(409, {"code": "assistant_activation_conflict"})
-            metadata = next((r.metadata_json for r in installation.resources if r.resource_type == "flow"), {}) or {}
-            write_audit_log(
-                db, action="assistant_activated", tenant_id=tenant_id, user_id=actor_id,
-                entity_type="marketplace_installation", entity_id=installation.id,
-                metadata={
-                    "installation_id": installation.id, "flow_id": flow.id,
-                    "template_id": metadata.get("template_id", installation.template_id),
-                    "template_version_id": metadata.get("template_version_id"),
-                    "configuration_version": payload.expected_configuration_version,
-                    "flow_version_id": target.id,
-                    "replaced_active_flow_id": other_active.id if other_active else None,
-                }, request=request,
-            )
+        # This explicit association is also written for an idempotent activation.
+        # It is the durable proof that the current configuration was accepted for
+        # the exact published version; the configurator never guesses by timestamp.
+        metadata = next((r.metadata_json for r in installation.resources if r.resource_type == "flow"), {}) or {}
+        write_audit_log(
+            db, action="assistant_activation_confirmed" if already_active else "assistant_activated",
+            tenant_id=tenant_id, user_id=actor_id,
+            entity_type="marketplace_installation", entity_id=installation.id,
+            metadata={
+                "installation_id": installation.id, "flow_id": flow.id,
+                "template_id": metadata.get("template_id", installation.template_id),
+                "template_version_id": metadata.get("template_version_id"),
+                "configuration_version": payload.expected_configuration_version,
+                "flow_version_id": target.id,
+                "replaced_active_flow_id": other_active.id if other_active else None,
+            }, request=request,
+        )
 
         db.commit()
         invalidate_flow_runtime_cache(flow.id)

@@ -138,3 +138,86 @@ class AssistantConfigurationResponse(StrictModel):
     updated_at: datetime | None
     updated_by: UUID | None
     management: AssistantFlowManagementResponse
+
+
+class ConfiguratorService(StrictModel):
+    id: str
+    label: str
+    duration_minutes: int
+
+
+class ConfiguratorHandoff(StrictModel):
+    enabled: bool
+    reason: str | None
+
+
+class ConfiguratorConfiguration(StrictModel):
+    status: Literal["configured", "needs_configuration"]
+    version: int
+    clinic_name: str | None
+    services: list[ConfiguratorService]
+    handoff: ConfiguratorHandoff | None
+
+
+class ConfiguratorAssistant(StrictModel):
+    type: Literal["appointment"]
+    template_id: str
+    template_version_id: UUID | None
+    flow_id: UUID | None
+    flow_name: str | None
+    status: Literal["needs_configuration", "ready_to_activate", "active", "changes_pending", "customized", "integration_error", "configuration_error"]
+
+
+class ConfiguratorCalendar(StrictModel):
+    connection_id: UUID | None
+    status: Literal["connected", "inactive", "missing", "not_configured"]
+    provider: Literal["google_calendar"]
+
+
+class ConfiguratorScheduling(StrictModel):
+    scope: Literal["workspace"]
+    timezone: str
+    business_hours: dict[str, list[dict[str, str]]]
+    slot_interval_minutes: int
+    default_duration_minutes: int
+
+
+class ConfiguratorManagement(StrictModel):
+    mode: Literal["managed", "customized", "unknown", "inconsistent"]
+    has_drift: bool | None
+
+
+class ConfiguratorActivation(StrictModel):
+    active: bool
+    up_to_date: bool
+    needs_activation: bool
+    would_replace_active_flow: bool
+
+
+class ConfiguratorActions(StrictModel):
+    can_edit: bool
+    can_activate: bool
+    can_open_builder: bool
+
+
+class ConfiguratorConcurrency(StrictModel):
+    configuration_version: int
+    managed_flow_version_id: UUID | None
+
+
+class ConfiguratorNotice(StrictModel):
+    code: Literal["assistant_configuration_required", "assistant_flow_customized", "assistant_calendar_connection_required", "assistant_calendar_connection_inactive", "assistant_management_unknown", "assistant_management_inconsistent", "assistant_activation_required", "assistant_appointment_policy_invalid"]
+    severity: Literal["info", "warning", "error"]
+
+
+class AssistantConfiguratorResponse(StrictModel):
+    installation_id: UUID
+    assistant: ConfiguratorAssistant
+    configuration: ConfiguratorConfiguration
+    calendar: ConfiguratorCalendar
+    scheduling: ConfiguratorScheduling | None
+    management: ConfiguratorManagement
+    activation: ConfiguratorActivation
+    actions: ConfiguratorActions
+    concurrency: ConfiguratorConcurrency
+    notices: list[ConfiguratorNotice]

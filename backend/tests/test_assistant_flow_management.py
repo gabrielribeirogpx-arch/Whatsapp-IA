@@ -12,6 +12,7 @@ from app.services.assistant_flow_management_service import (
     assert_managed_flow_baseline,
     detect_flow_drift,
     establish_official_baseline,
+    inspect_flow_management,
 )
 from tests.test_assistant_configuration_schema import valid_configuration
 
@@ -97,6 +98,21 @@ def test_different_id_equal_checksum_advances_baseline_and_remains_managed():
     assert state.mode == "managed" and state.managed_flow_version_id == current.id
     assert row.managed_flow_version_id == current.id
     assert not any(isinstance(item, AuditLog) for item in db.added)
+
+
+def test_read_only_inspection_never_advances_baseline_or_marks_drift():
+    tenant_id = uuid4(); flow, baseline = graph(tenant_id); installation = installation_for(flow, tenant_id)
+    current = FlowVersion(id=uuid4(), flow_id=flow.id, tenant_id=tenant_id, version=2, graph_checksum="b" * 64)
+    flow.current_version_id = current.id
+    row = management(installation, flow, baseline)
+    before = (row.management_mode, row.managed_flow_version_id, row.managed_graph_checksum, row.updated_at)
+    db = QueueDB([flow, row, baseline, current])
+
+    state = inspect_flow_management(db, installation=installation, tenant_id=tenant_id)
+
+    assert state.mode == "customized" and state.has_drift is True
+    assert (row.management_mode, row.managed_flow_version_id, row.managed_graph_checksum, row.updated_at) == before
+    assert db.added == []
 
 
 def test_real_drift_marks_customized_and_audits_only_first_detection():

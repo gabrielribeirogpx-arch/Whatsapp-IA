@@ -11,9 +11,9 @@ from app.services.marketplace_installation_service import MarketplaceInstallatio
 from app.marketplace_assets import ASSETS, ITEMS, MarketplaceGraphValidator
 from app.services.tenant_service import get_current_tenant
 from app.schemas.assistant_configuration import (AssistantActivationRequest, AssistantActivationResponse,
-    AssistantConfigurationResponse, AssistantConfigurationUpdate, AssistantMaterializationRequest,
+    AssistantConfigurationResponse, AssistantConfigurationUpdate, AssistantConfiguratorResponse, AssistantMaterializationRequest,
     AssistantMaterializationResponse)
-from app.security.workspace_rbac import WorkspacePermission, require_same_tenant
+from app.security.workspace_rbac import WorkspacePermission, require_permission, require_same_tenant
 from app.services.administrative_audit import require_administrative_permission
 from app.services.assistant_configuration_service import (
     get_installation_for_configuration,
@@ -23,6 +23,7 @@ from app.services.assistant_configuration_service import (
 from app.services.assistant_flow_management_service import detect_flow_drift
 from app.services.assistant_materialization_service import materialize_configuration
 from app.services.assistant_activation_service import activate_assistant_configuration
+from app.services.assistant_configurator_service import AssistantConfiguratorService
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 class InstallBody(BaseModel):
@@ -149,6 +150,22 @@ def get_assistant_configuration(
     )
     db.commit()
     return serialize_configuration(installation, management.public_dict())
+
+
+@router.get("/installations/{installation_id}/configurator", response_model=AssistantConfiguratorResponse)
+def get_assistant_configurator(
+    installation_id: UUID,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
+):
+    """Return the complete, read-only product projection for the simple UI."""
+    require_same_tenant(user, tenant.id)
+    # Unlike administrative mutations, a denied GET must not emit an audit write.
+    require_permission(user, WorkspacePermission.VIEW_FLOWS)
+    return AssistantConfiguratorService(db).read(
+        installation_id=installation_id, tenant_id=tenant.id, user=user,
+    )
 
 @router.put("/installations/{installation_id}/configuration", response_model=AssistantConfigurationResponse)
 def put_assistant_configuration(

@@ -165,6 +165,46 @@ def detect_flow_drift(
     return FlowManagementState("customized", flow.id, row.managed_flow_version_id, current.id, True)
 
 
+def inspect_flow_management(
+    db: Session, *, installation: MarketplaceInstallation, tenant_id: UUID,
+) -> FlowManagementState:
+    """Inspect the persisted baseline without locks, writes, lazy initialization or audit.
+
+    This is deliberately conservative: malformed provenance/baselines are never
+    presented as managed.  Comparing the two already-persisted version checksums
+    does not load either graph.
+    """
+    if installation.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="installation_not_found")
+    resource = _flow_resource(installation)
+    flow_id = _uuid(resource.resource_id) if resource else None
+    if flow_id is None:
+        return FlowManagementState("unknown", None, None, None, None)
+    flow = db.scalar(select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id))
+    if flow is None:
+        return FlowManagementState("unknown", flow_id, None, None, None)
+    row = db.scalar(select(MarketplaceInstallationFlowManagement).where(
+        MarketplaceInstallationFlowManagement.installation_id == installation.id,
+        MarketplaceInstallationFlowManagement.flow_id == flow.id,
+    ))
+    if row is None:
+        return FlowManagementState("unknown", flow.id, None, flow.current_version_id, None)
+    baseline = _load_version(db, row.managed_flow_version_id, flow, tenant_id)
+    current = _load_version(db, flow.current_version_id, flow, tenant_id)
+    if (row.management_mode in {"unknown", "inconsistent"} or baseline is None or current is None
+            or not _valid_checksum(row.managed_graph_checksum)
+            or baseline.graph_checksum != row.managed_graph_checksum
+            or not _valid_checksum(current.graph_checksum)):
+        mode = row.management_mode if row.management_mode in {"unknown", "inconsistent"} else "inconsistent"
+        return FlowManagementState(mode, flow.id, row.managed_flow_version_id, flow.current_version_id, None)
+    drift = current.graph_checksum != row.managed_graph_checksum
+    return FlowManagementState(
+        "customized" if drift or row.management_mode == "customized" else "managed",
+        flow.id, row.managed_flow_version_id, current.id,
+        bool(drift or row.management_mode == "customized"),
+    )
+
+
 def assert_managed_flow_baseline(
     db: Session, *, installation: MarketplaceInstallation, tenant_id: UUID,
     expected_managed_flow_version_id: UUID | None,
