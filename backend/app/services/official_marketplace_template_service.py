@@ -21,6 +21,7 @@ from app.models import (
     MarketplaceTemplateVersion,
 )
 from app.models.audit_log import AuditLog
+from app.services.assistant_flow_management_service import establish_official_baseline
 
 STATUSES = {"draft", "preview_only", "published"}
 MODALITIES = {"Sem IA", "Híbrido", "IA Completa", "Sistema Completo"}
@@ -175,6 +176,10 @@ class OfficialMarketplaceTemplateService:
                 },
             )
             self.db.add(resource)
+            establish_official_baseline(
+                self.db, installation=installation, flow=flow,
+                flow_version=result.version, checksum=result.version.graph_checksum,
+            )
             installation.created_resources = {"flows": [str(flow.id)]}
             installation.status = "completed"
             installation.completed_at = datetime.utcnow()

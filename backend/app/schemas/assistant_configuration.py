@@ -89,6 +89,14 @@ class AssistantConfigurationUpdate(StrictModel):
     configuration: AssistantConfigurationV1
 
 
+class AssistantFlowManagementResponse(StrictModel):
+    mode: Literal["managed", "customized", "unknown", "inconsistent"]
+    flow_id: UUID | None
+    managed_flow_version_id: UUID | None
+    current_flow_version_id: UUID | None
+    has_drift: bool | None
+
+
 class AssistantConfigurationResponse(StrictModel):
     installation_id: UUID
     status: Literal["configured", "needs_configuration"]
@@ -96,3 +104,4 @@ class AssistantConfigurationResponse(StrictModel):
     configuration: AssistantConfigurationV1 | None
     updated_at: datetime | None
     updated_by: UUID | None
+    management: AssistantFlowManagementResponse

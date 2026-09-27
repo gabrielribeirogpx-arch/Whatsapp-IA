@@ -33,7 +33,7 @@ def supports_assistant_configuration(installation: MarketplaceInstallation) -> b
     return CAPABILITY in _capabilities(installation) or installation.template_slug in BUILTIN_APPOINTMENT_TEMPLATES
 
 
-def serialize_configuration(installation: MarketplaceInstallation) -> dict:
+def serialize_configuration(installation: MarketplaceInstallation, management: dict) -> dict:
     row = installation.assistant_configuration
     return {
         "installation_id": installation.id,
@@ -42,6 +42,7 @@ def serialize_configuration(installation: MarketplaceInstallation) -> dict:
         "configuration": row.configuration if row else None,
         "updated_at": row.updated_at if row else None,
         "updated_by": row.updated_by_user_id if row else None,
+        "management": management,
     }
 
 
