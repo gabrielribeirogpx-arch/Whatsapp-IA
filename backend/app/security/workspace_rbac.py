@@ -37,6 +37,10 @@ class WorkspacePermission(str, Enum):
     VIEW_AUDIT_LOG = "view_audit_log"
     MANAGE_SETTINGS = "manage_settings"
     MANAGE_INTEGRATIONS = "manage_integrations"
+    VIEW_FLOWS = "view_flows"
+    MANAGE_FLOWS = "manage_flows"
+    PUBLISH_FLOWS = "publish_flows"
+    ACTIVATE_FLOWS = "activate_flows"
 
 
 ROLE_RANK: dict[WorkspaceRole, int] = {
@@ -57,10 +61,14 @@ PERMISSION_MATRIX: dict[WorkspaceRole, frozenset[WorkspacePermission]] = {
             WorkspacePermission.VIEW_AUDIT_LOG,
             WorkspacePermission.MANAGE_SETTINGS,
             WorkspacePermission.MANAGE_INTEGRATIONS,
+            WorkspacePermission.VIEW_FLOWS,
+            WorkspacePermission.MANAGE_FLOWS,
+            WorkspacePermission.PUBLISH_FLOWS,
+            WorkspacePermission.ACTIVATE_FLOWS,
         }
     ),
-    WorkspaceRole.MEMBER: frozenset(),
-    WorkspaceRole.VIEWER: frozenset(),
+    WorkspaceRole.MEMBER: frozenset({WorkspacePermission.VIEW_FLOWS}),
+    WorkspaceRole.VIEWER: frozenset({WorkspacePermission.VIEW_FLOWS}),
 }
 
 
