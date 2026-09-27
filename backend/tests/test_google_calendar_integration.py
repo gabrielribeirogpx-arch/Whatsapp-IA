@@ -22,6 +22,7 @@ from app.routers.google_calendar_integration import (
     create_oauth_state,
     get_google_calendar_connect_tenant,
     router,
+    safe_return_path,
     verify_oauth_state,
 )
 from app.services.integration_connection_service import IntegrationConnectionService
@@ -98,6 +99,43 @@ def test_google_calendar_state_contains_tenant_nonce_and_rejects_tampering():
     assert payload["nonce"] == "nonce-123"
     with pytest.raises(Exception):
         verify_oauth_state(state + "tampered")
+
+
+@pytest.mark.parametrize("value", [
+    "https://evil.example", "/\\evil", "//evil.example", "javascript:alert(1)",
+    "/dashboard/assistants/appointments/not-a-uuid",
+])
+def test_return_path_rejects_open_redirects(value):
+    assert safe_return_path(value) is None
+
+
+def test_return_path_accepts_appointment_configurator():
+    installation_id = uuid.uuid4()
+    path = f"/dashboard/assistants/appointments/{installation_id}"
+    assert safe_return_path(path) == path
+
+
+def test_connect_preserves_safe_return_path_in_signed_state():
+    tenant_id = uuid.uuid4()
+    installation_id = uuid.uuid4()
+    path = f"/dashboard/assistants/appointments/{installation_id}"
+    tenant = Tenant(id=tenant_id, name="Tenant", slug="tenant-ok")
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        f"/api/integrations/google-calendar/connect?tenant_slug=tenant-ok&return_to={path}",
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
+    assert verify_oauth_state(state)["return_to"] == path
+
+
+def test_connect_rejects_unsafe_return_path():
+    tenant_id = uuid.uuid4()
+    tenant = Tenant(id=tenant_id, name="Tenant", slug="tenant-ok")
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        "/api/integrations/google-calendar/connect?tenant_slug=tenant-ok&return_to=https://evil.example",
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
 
 
 def test_connect_redirect_includes_secure_state_and_required_scopes():
@@ -374,6 +412,24 @@ def test_callback_exchanges_code_fetches_email_and_persists_encrypted_tokens(mon
     assert IntegrationConnectionService.decrypt_credential(connection.refresh_token_encrypted) == "refresh-token"
     assert "access-token" not in response.text
     assert "refresh-token" not in response.text
+
+
+def test_callback_returns_to_configurator_context(monkeypatch):
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+    path = f"/dashboard/assistants/appointments/{uuid.uuid4()}"
+    state = create_oauth_state(tenant_id, nonce="context-nonce", return_to=path)
+    monkeypatch.setattr(router_module, "_exchange_code_for_tokens", lambda *_: {"access_token": "access"})
+    monkeypatch.setattr(router_module, "_fetch_account_email", lambda *_: "calendar@example.com")
+
+    response = _client(tenant_id, db).get(
+        f"/api/integrations/google-calendar/callback?code=auth-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == f"https://frontend.example.com{path}"
+    assert db.connections[0].status == "active"
 
 
 def test_callback_redirects_to_frontend_error_on_oauth_failure():

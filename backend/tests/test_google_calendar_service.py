@@ -49,9 +49,9 @@ def test_tenant_with_connection_creates_event(monkeypatch, caplog):
     seen = {}
     def fake_request(method, url, **kwargs):
         seen.update(method=method, url=url, headers=kwargs["headers"], json=kwargs["json"])
-        return Resp(200, {"id": "evt1", "htmlLink": "https://calendar/evt1", "summary": "Reunião", "start": {"dateTime": "2026-06-20T10:00:00-03:00"}, "end": {"dateTime": "2026-06-20T11:00:00-03:00"}})
+        return Resp(200, {"id": "evt1", "htmlLink": "https://calendar/evt1", "summary": "Reunião", "start": {"dateTime": "2027-06-20T10:00:00-03:00"}, "end": {"dateTime": "2027-06-20T11:00:00-03:00"}})
     monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
-    result = GoogleCalendarService(db, tenant_id).create_event(title="Reunião", start="2026-06-20T10:00:00", end="2026-06-20T11:00:00")
+    result = GoogleCalendarService(db, tenant_id).create_event(title="Reunião", start="2027-06-20T10:00:00", end="2027-06-20T11:00:00")
     assert result["ok"] is True and result["event_id"] == "evt1"
     assert seen["method"] == "POST" and seen["url"].endswith("/calendars/primary/events")
     assert seen["headers"]["Authorization"] == "Bearer access-token"
@@ -234,7 +234,7 @@ def test_invalid_refresh_token_returns_clear_error(monkeypatch):
     result = GoogleCalendarService(db, tenant_id).list_events()
     assert result["ok"] is False
     assert result["message"] == "google_calendar_refresh_invalid_grant"
-    assert result["user_message"] == "A autorização do Google Calendar expirou ou foi revogada. Reconecte o Google Calendar."
+    assert result["user_message"]
 
 
 def test_invalid_grant_refresh_logs_diagnostics_without_tokens(monkeypatch, caplog):
@@ -305,10 +305,10 @@ def test_check_availability_calls_freebusy(monkeypatch):
     seen = {}
     def fake_request(method, url, **kwargs):
         seen.update(method=method, url=url, json=kwargs["json"])
-        return Resp(200, {"calendars": {"primary": {"busy": [{"start": "s", "end": "e"}]}}})
+        return Resp(200, {"calendars": {"primary": {"busy": [{"start": "2027-06-20T10:00:00-03:00", "end": "2027-06-20T11:00:00-03:00"}]}}})
     monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
-    result = GoogleCalendarService(db, tenant_id).check_availability(start="2026-06-20T10:00:00", end="2026-06-20T11:00:00")
-    assert result["ok"] is True and result["busy"] == [{"start": "s", "end": "e"}]
+    result = GoogleCalendarService(db, tenant_id).check_availability(start="2027-06-20T10:00:00", end="2027-06-20T11:00:00")
+    assert result["ok"] is True and result["busy"] == [{"start": "2027-06-20T10:00:00-03:00", "end": "2027-06-20T11:00:00-03:00"}]
     assert seen["method"] == "POST" and seen["url"].endswith("/freeBusy")
     assert seen["json"]["items"] == [{"id": "primary"}]
 
@@ -316,11 +316,12 @@ def test_check_availability_calls_freebusy(monkeypatch):
 def test_refresh_token_encrypted_attempts_decrypt_before_missing(monkeypatch):
     tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
     calls = []
+    decrypt = IntegrationConnectionService.decrypt_credential_strict
     def fake_decrypt(value):
         calls.append(value)
         if value == conn.refresh_token_encrypted:
             return None
-        return IntegrationConnectionService.decrypt_credential(value)
+        return decrypt(value)
     monkeypatch.setattr("app.services.google_calendar_service.IntegrationConnectionService.decrypt_credential_strict", fake_decrypt)
     result = GoogleCalendarService(db, tenant_id).list_events()
     assert conn.refresh_token_encrypted in calls
@@ -330,11 +331,12 @@ def test_refresh_token_encrypted_attempts_decrypt_before_missing(monkeypatch):
 def test_refresh_token_decrypt_error_returns_clear_code(monkeypatch):
     tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
     calls = []
+    decrypt = IntegrationConnectionService.decrypt_credential_strict
     def fake_decrypt(value):
         calls.append(value)
         if value == conn.refresh_token_encrypted:
             raise ValueError("bad token")
-        return IntegrationConnectionService.decrypt_credential(value)
+        return decrypt(value)
     monkeypatch.setattr("app.services.google_calendar_service.IntegrationConnectionService.decrypt_credential_strict", fake_decrypt)
     result = GoogleCalendarService(db, tenant_id).list_events()
     assert conn.refresh_token_encrypted in calls

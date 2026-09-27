@@ -172,6 +172,13 @@ class ConfiguratorCalendar(StrictModel):
     connection_id: UUID | None
     status: Literal["connected", "inactive", "missing", "not_configured"]
     provider: Literal["google_calendar"]
+    available_connections: list["ConfiguratorCalendarConnection"]
+
+
+class ConfiguratorCalendarConnection(StrictModel):
+    id: UUID
+    status: Literal["active"]
+    label: str
 
 
 class ConfiguratorScheduling(StrictModel):

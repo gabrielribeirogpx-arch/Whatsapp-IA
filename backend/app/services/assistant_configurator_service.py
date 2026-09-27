@@ -36,6 +36,13 @@ class AssistantConfiguratorService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _available_calendar_connections(self, tenant_id: UUID) -> list[IntegrationConnection]:
+        return list(self.db.scalars(select(IntegrationConnection).where(
+            IntegrationConnection.tenant_id == tenant_id,
+            IntegrationConnection.provider == "google_calendar",
+            IntegrationConnection.status == "active",
+        ).order_by(IntegrationConnection.created_at.asc(), IntegrationConnection.id.asc())).all())
+
     def read(self, *, installation_id: UUID, tenant_id: UUID, user: TenantUser) -> dict:
         installation = get_installation_for_configuration(self.db, installation_id, tenant_id)
         management = inspect_flow_management(self.db, installation=installation, tenant_id=tenant_id)
@@ -60,6 +67,7 @@ class AssistantConfiguratorService:
 
         connection = None
         calendar_status = "not_configured"
+        available_connections = self._available_calendar_connections(tenant_id)
         connection_id = configuration.google_calendar_connection_id if configuration else None
         if connection_id:
             connection = self.db.scalar(select(IntegrationConnection).where(
@@ -121,7 +129,23 @@ class AssistantConfiguratorService:
                 "services": [service.model_dump() for service in configuration.services] if configuration else [],
                 "handoff": configuration.handoff.model_dump() if configuration else None,
             },
-            "calendar": {"connection_id": connection_id, "status": calendar_status, "provider": "google_calendar"},
+            "calendar": {
+                "connection_id": connection_id,
+                "status": calendar_status,
+                "provider": "google_calendar",
+                "available_connections": [
+                    {
+                        "id": item.id,
+                        "status": "active",
+                        "label": (
+                            item.metadata_json.get("account_email")
+                            if isinstance(item.metadata_json, dict) and item.metadata_json.get("account_email")
+                            else "Google Calendar"
+                        ),
+                    }
+                    for item in available_connections
+                ],
+            },
             "scheduling": scheduling,
             "management": {"mode": management.mode, "has_drift": management.has_drift},
             "activation": {

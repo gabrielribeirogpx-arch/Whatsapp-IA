@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta
@@ -43,6 +44,9 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 STATE_TTL_SECONDS = 10 * 60
+APPOINTMENT_RETURN_PATH = re.compile(
+    r"^/dashboard/assistants/appointments/[0-9a-fA-F-]{36}$"
+)
 
 router = APIRouter(prefix="/integrations/google-calendar", tags=["google-calendar-integration"])
 logger = logging.getLogger(__name__)
@@ -52,8 +56,21 @@ def _frontend_base_url() -> str:
     return frontend_url()
 
 
-def _frontend_oauth_result_url(status: str) -> str:
+def safe_return_path(value: str | None) -> str | None:
+    """Accept only the appointment configurator route, never an external URL."""
+    if not value or "\\" in value or not APPOINTMENT_RETURN_PATH.fullmatch(value):
+        return None
+    try:
+        uuid.UUID(value.rsplit("/", 1)[-1])
+    except ValueError:
+        return None
+    return value
+
+
+def _frontend_oauth_result_url(status: str, return_to: str | None = None) -> str:
     base = _frontend_base_url()
+    if safe_return_path(return_to):
+        return f"{base}{return_to}"
     parsed = urlparse(f"{base}/dashboard/ai/mcp")
     query = urlencode({
         "integration": PROVIDER,
@@ -122,13 +139,14 @@ def _validate_google_calendar_connect_config(request: Request) -> None:
     _redirect_uri(request)
 
 
-def create_oauth_state(tenant_id: uuid.UUID, *, user_id: uuid.UUID | None = None, nonce: str | None = None, issued_at: int | None = None) -> str:
+def create_oauth_state(tenant_id: uuid.UUID, *, user_id: uuid.UUID | None = None, nonce: str | None = None, issued_at: int | None = None, return_to: str | None = None) -> str:
     payload = {
         "tenant_id": str(tenant_id),
         "provider": PROVIDER,
         "user_id": str(user_id) if user_id else None,
         "nonce": nonce or secrets.token_urlsafe(24),
         "iat": issued_at or int(datetime.utcnow().timestamp()),
+        "return_to": safe_return_path(return_to),
     }
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")
@@ -188,6 +206,7 @@ def connect_google_calendar(
     request: Request,
     tenant_slug: str | None = Query(None),
     tenant_id: str | None = Query(None),
+    return_to: str | None = Query(None),
     x_tenant_slug: str | None = Header(None, alias="X-Tenant-Slug"),
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
     x_tenant_id_upper: str | None = Header(None, alias="X-Tenant-ID"),
@@ -237,7 +256,9 @@ def connect_google_calendar(
             raise HTTPException(status_code=500, detail="Tenant sem ID")
         if str(user.tenant_id) != str(tenant.id):
             raise HTTPException(status_code=404, detail="Integração não encontrada")
-        state = create_oauth_state(tenant.id, user_id=user.id)
+        if return_to is not None and safe_return_path(return_to) is None:
+            raise HTTPException(status_code=400, detail="returnTo inválido")
+        state = create_oauth_state(tenant.id, user_id=user.id, return_to=return_to)
         write_audit_log(db, action="integration_oauth_started", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id=PROVIDER, metadata={"provider": PROVIDER}, request=request, commit=True)
         params = {
             "client_id": _client_id(),
@@ -307,7 +328,7 @@ def google_calendar_callback(request: Request, code: str | None = None, state: s
         actor_id = uuid.UUID(str(payload["user_id"])) if payload.get("user_id") else None
         write_audit_log(db, action="integration_connected", tenant_id=tenant_id, user_id=actor_id, entity_type="integration", entity_id=getattr(connection, "id", PROVIDER), metadata={"provider": PROVIDER, "auth_type": AUTH_TYPE, "actor_type": "human" if actor_id else "system"}, request=request)
         db.commit()
-        return RedirectResponse(_frontend_oauth_result_url("connected"), status_code=302)
+        return RedirectResponse(_frontend_oauth_result_url("connected", payload.get("return_to")), status_code=302)
     except Exception as exc:
         db.rollback()
         logger.exception(
@@ -315,7 +336,13 @@ def google_calendar_callback(request: Request, code: str | None = None, state: s
             type(exc).__name__,
             str(exc),
         )
-        return RedirectResponse(_frontend_oauth_result_url("error"), status_code=302)
+        return_to = None
+        if state:
+            try:
+                return_to = verify_oauth_state(state).get("return_to")
+            except Exception:
+                pass
+        return RedirectResponse(_frontend_oauth_result_url("error", return_to), status_code=302)
 
 
 @router.get("/status", response_model=IntegrationConnectionStatusOut)

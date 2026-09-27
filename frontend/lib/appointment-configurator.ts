@@ -25,11 +25,13 @@ export function serviceId(label: string, existing: readonly AppointmentServiceCo
 }
 
 export function configurationFrom(snapshot: AppointmentConfigurator): AppointmentAssistantConfiguration {
+  const connectionId = snapshot.calendar.connection_id
+    || (snapshot.calendar.available_connections.length === 1 ? snapshot.calendar.available_connections[0].id : '');
   return {
     schema_version: 1,
     clinic_name: snapshot.configuration.clinic_name || '',
     services: snapshot.configuration.services.length ? snapshot.configuration.services.map((item) => ({ ...item })) : [{ id: 'consulta', label: 'Consulta', duration_minutes: 30 }],
-    google_calendar_connection_id: snapshot.calendar.connection_id || '',
+    google_calendar_connection_id: connectionId,
     handoff: snapshot.configuration.handoff ? { ...snapshot.configuration.handoff } : { enabled: true, reason: 'Solicitação do paciente' },
   };
 }

@@ -65,6 +65,16 @@ class FakeDb:
     def rollback(self):
         pass
 
+    def query(self, _model):
+        """Minimal legacy Query double used by scheduling-policy consumers."""
+        return self
+
+    def filter(self, *_criteria):
+        return self
+
+    def one_or_none(self):
+        return None
+
     def execute(self, statement):
         compiled = statement.compile()
         params = compiled.params

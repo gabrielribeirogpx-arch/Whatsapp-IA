@@ -292,7 +292,7 @@ export type AppointmentConfigurator = {
   installation_id: string;
   assistant: { type: 'appointment'; template_id: string; template_version_id: string | null; flow_id: string | null; flow_name: string | null; status: AppointmentAssistantStatus };
   configuration: { status: 'configured' | 'needs_configuration'; version: number; clinic_name: string | null; services: AppointmentServiceConfiguration[]; handoff: AppointmentHandoffConfiguration | null };
-  calendar: { connection_id: string | null; status: AppointmentCalendarStatus; provider: 'google_calendar' };
+  calendar: { connection_id: string | null; status: AppointmentCalendarStatus; provider: 'google_calendar'; available_connections: Array<{ id: string; status: 'active'; label: string }> };
   scheduling: { scope: 'workspace'; timezone: string; business_hours: Record<string, Array<{ start: string; end: string }>>; slot_interval_minutes: number; default_duration_minutes: number } | null;
   management: { mode: 'managed' | 'customized' | 'unknown' | 'inconsistent'; has_drift: boolean | null };
   activation: { active: boolean; up_to_date: boolean; needs_activation: boolean; would_replace_active_flow: boolean };
@@ -961,10 +961,12 @@ export async function disconnectGoogle(): Promise<GoogleCalendarConnectionStatus
   return parseApiResponse<GoogleCalendarConnectionStatus>(res);
 }
 
-export function getGoogleCalendarConnectUrl(): string {
+export function getGoogleCalendarConnectUrl(returnTo?: string): string {
   const tenant = getTenantSlugOrId();
   if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Google Calendar.');
-  return buildApiUrl(`/api/integrations/google-calendar/connect?tenant_slug=${encodeURIComponent(tenant)}`);
+  const params = new URLSearchParams({ tenant_slug: tenant });
+  if (returnTo) params.set('return_to', returnTo);
+  return buildApiUrl(`/api/integrations/google-calendar/connect?${params.toString()}`);
 }
 
 
