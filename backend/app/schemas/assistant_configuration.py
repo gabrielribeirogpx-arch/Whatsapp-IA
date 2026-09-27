@@ -89,12 +89,27 @@ class AssistantConfigurationUpdate(StrictModel):
     configuration: AssistantConfigurationV1
 
 
+class AssistantMaterializationRequest(StrictModel):
+    expected_configuration_version: int = Field(ge=1, strict=True)
+    expected_managed_flow_version_id: UUID
+
+
 class AssistantFlowManagementResponse(StrictModel):
     mode: Literal["managed", "customized", "unknown", "inconsistent"]
     flow_id: UUID | None
     managed_flow_version_id: UUID | None
     current_flow_version_id: UUID | None
     has_drift: bool | None
+
+
+class AssistantMaterializationResponse(StrictModel):
+    installation_id: UUID
+    flow_id: UUID
+    configuration_version: int
+    materialized: bool
+    reason: Literal["materialized", "already_up_to_date"]
+    flow_version_id: UUID
+    management: AssistantFlowManagementResponse
 
 
 class AssistantConfigurationResponse(StrictModel):
