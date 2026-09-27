@@ -508,7 +508,40 @@ class GoogleCalendarToolAdapter:
                 result = service.list_events(**args)
                 action = "list_events"
             elif tool_id in {"google_calendar_check_availability", "calendar.get_availability"}:
-                result = service.check_availability(**args)
+                from app.services.appointment_duration_service import (
+                    AppointmentDurationError,
+                    resolve_effective_appointment_duration,
+                )
+                from app.services.appointment_policy_service import policy_for_tenant
+
+                policy = policy_for_tenant(db, context.tenant_id)
+                try:
+                    effective = resolve_effective_appointment_duration(
+                        db,
+                        tenant_id=context.tenant_id,
+                        flow_id=context.flow_id,
+                        flow_version_id=context.flow_version_id,
+                        runtime_variables=context.runtime_variables,
+                        default_duration_minutes=policy["default_duration_minutes"],
+                    )
+                except AppointmentDurationError as exc:
+                    return _calendar_failure(tool_id, exc.code)
+                _log_tool(
+                    "GOOGLE_CALENDAR_EFFECTIVE_DURATION",
+                    tenant_id=context.tenant_id,
+                    tool_name=tool_id,
+                    input={},
+                    db=None,
+                    flow_id=str(context.flow_id) if context.flow_id else None,
+                    duration_source=effective.source,
+                    service_id=effective.service_id,
+                    duration_minutes=effective.duration_minutes,
+                )
+                # Private kwarg is resolved from server-owned provenance, never tool input.
+                result = service.check_availability(
+                    **{key: value for key, value in args.items() if key != "_effective_duration_minutes"},
+                    _effective_duration_minutes=effective.duration_minutes,
+                )
                 action = "check_availability"
             elif tool_id in {"google_calendar_delete_event", "calendar.cancel_appointment"}:
                 result = service.delete_event(str(args.get("event_id") or args.get("id") or ""))
@@ -533,6 +566,12 @@ class GoogleCalendarToolAdapter:
                 result = {"ok": False, "message": "Ferramenta Google Calendar não encontrada."}
                 action = "unknown"
         except Exception as exc:
+            from app.services.appointment_policy_service import AppointmentPolicyError
+
+            if isinstance(exc, AppointmentPolicyError) and tool_id in {
+                "google_calendar_check_availability", "calendar.get_availability"
+            }:
+                return _calendar_failure(tool_id, exc.code)
             _log_tool("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, exception=exc)
             if tool_id in {
                 "google_calendar_find_managed_appointments",

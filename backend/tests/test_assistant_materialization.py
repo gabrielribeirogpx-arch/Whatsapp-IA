@@ -72,7 +72,7 @@ def test_template_contract_rejects_unknown_fields_duplicates_and_missing_capabil
     def version(targets, capabilities=("appointment_assistant_configuration",)):
         return SimpleNamespace(manifest={
             "capabilities": list(capabilities),
-            "assistant_materialization": {"schema_version": 1, "targets": targets},
+            "assistant_materialization": {"schema_version": 1, "service_selection_variable": "appointment_type", "targets": targets},
         })
 
     assert _contract(version(TARGETS)) == TARGETS
@@ -83,6 +83,13 @@ def test_template_contract_rejects_unknown_fields_duplicates_and_missing_capabil
         _contract(version([TARGETS[0], TARGETS[0]]))
     with pytest.raises(HTTPException, match="template_does_not_support_materialization"):
         _contract(version(TARGETS, capabilities=()))
+
+    missing_binding = SimpleNamespace(manifest={
+        "capabilities": ["appointment_assistant_configuration"],
+        "assistant_materialization": {"schema_version": 1, "targets": TARGETS},
+    })
+    with pytest.raises(HTTPException, match="invalid_materialization_contract"):
+        _contract(missing_binding)
 
 
 @pytest.mark.parametrize("extra", ["node_id", "path", "nodes", "edges", "tool_name", "connection_id"])

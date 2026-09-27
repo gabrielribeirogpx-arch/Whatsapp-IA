@@ -50,6 +50,9 @@ def _contract(version: MarketplaceTemplateVersion) -> list[dict[str, str]]:
     raw = manifest.get(CONTRACT_KEY)
     if not isinstance(raw, dict) or raw.get("schema_version") != 1:
         raise HTTPException(422, "template_does_not_support_materialization")
+    variable = raw.get("service_selection_variable")
+    if not isinstance(variable, str) or not variable.strip() or len(variable) > 120:
+        raise HTTPException(422, "invalid_materialization_contract")
     if CAPABILITY not in manifest.get("capabilities", []):
         raise HTTPException(422, "template_does_not_support_materialization")
     targets = raw.get("targets")

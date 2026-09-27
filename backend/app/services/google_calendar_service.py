@@ -591,7 +591,7 @@ class GoogleCalendarService:
             from app.services.appointment_policy_service import appointments_for_availability, policy_for_tenant
             policy = policy_for_tenant(self.db, self.tenant_id)
             mode = str(kwargs.get("mode") or "period")
-            appointments = appointments_for_availability(start=body["timeMin"], end=body["timeMax"], timezone=tz, busy=busy, policy=policy, mode=mode)
+            appointments = appointments_for_availability(start=body["timeMin"], end=body["timeMax"], timezone=tz, busy=busy, policy=policy, mode=mode, duration_minutes=kwargs.get("_effective_duration_minutes"))
             # Canonical availability contract: ToolResult.data is this object and appointments is its list.
             result = {"ok": True, "busy": busy, "appointments": appointments}
             self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", result=result, **auth_trace)

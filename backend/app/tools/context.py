@@ -34,6 +34,8 @@ class ToolContext:
     trace_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     contact_id: Any | None = None
+    # Snapshot of server-owned session variables; never populated from tool args.
+    runtime_variables: dict[str, Any] = field(default_factory=dict)
 
     def safe_metadata(self) -> dict[str, Any]:
         return sanitize_metadata(self.metadata if isinstance(self.metadata, dict) else {})
