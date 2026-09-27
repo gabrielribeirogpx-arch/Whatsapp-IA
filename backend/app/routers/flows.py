@@ -27,6 +27,8 @@ from app.models.flow_session import set_current_node_id
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, get_flow_list_metrics, resolve_analytics_period
 from app.services.audit_service import write_audit_log
 from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission, require_same_tenant
+from app.services.administrative_audit import require_administrative_permission
 from app.services.flow_engine_service import (
     get_flow_for_builder,
     get_flow_graph,
@@ -53,6 +55,36 @@ router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
 logger = logging.getLogger(__name__)
 logger.info("[FLOW API] carregada")
+
+
+def _flow_permission_dependency(permission: WorkspacePermission):
+    """Build the shared authenticated, tenant-bound RBAC boundary for Flow routes."""
+    def dependency(
+        request: Request,
+        db: Session = Depends(get_db),
+        current_user: TenantUser = Depends(get_current_user),
+    ) -> TenantUser:
+        path_tenant_id = request.path_params.get("tenant_id")
+        if path_tenant_id is not None:
+            require_same_tenant(current_user, path_tenant_id)
+        require_administrative_permission(
+            db,
+            current_user,
+            permission,
+            request=request,
+            action=request.url.path,
+            resource_type="flow",
+            resource_id=request.path_params.get("flow_id"),
+        )
+        return current_user
+
+    return dependency
+
+
+require_flow_view = _flow_permission_dependency(WorkspacePermission.VIEW_FLOWS)
+require_flow_manage = _flow_permission_dependency(WorkspacePermission.MANAGE_FLOWS)
+require_flow_publish = _flow_permission_dependency(WorkspacePermission.PUBLISH_FLOWS)
+require_flow_activate = _flow_permission_dependency(WorkspacePermission.ACTIVATE_FLOWS)
 
 AUDIT_TEXT_MARKERS = [
     "Boa 👋 Me fala melhor",
@@ -1159,7 +1191,7 @@ class FlowVersionResponse(CanonicalFlowVersionResponse):
     name: str | None = None
 
 
-@router.get("/tenant-flow-audit")
+@router.get("/tenant-flow-audit", dependencies=[Depends(require_flow_view)])
 def tenant_flow_audit(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -1253,7 +1285,7 @@ def parse_flow_id(flow_id: str):
         return flow_id
 
 
-@router.post("/reset-tenant-flows")
+@router.post("/reset-tenant-flows", dependencies=[Depends(require_flow_manage)])
 def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(get_db)):
     try:
         tenant_uuid = payload.tenant_id
@@ -1451,7 +1483,7 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         )
 
 
-@router.post("/admin/reset-flow-runtime-state")
+@router.post("/admin/reset-flow-runtime-state", dependencies=[Depends(require_flow_manage)])
 def reset_flow_runtime_state(payload: ResetFlowRuntimeStatePayload, db: Session = Depends(get_db)):
     if payload.confirm != "RESET_FLOW_RUNTIME_STATE":
         raise HTTPException(status_code=400, detail="confirm inválido")
@@ -1836,8 +1868,8 @@ def validate_flow_payload_or_400(
     return nodes, edges
 
 
-@router.get("")
-@router.get("/")
+@router.get("", dependencies=[Depends(require_flow_view)])
+@router.get("/", dependencies=[Depends(require_flow_view)])
 def list_flows(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -1847,7 +1879,7 @@ def list_flows(
     return [_serialize_flow(item, metrics=metrics.get(item.id)) for item in get_flows(db=db, tenant_id=tenant.id)]
 
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_flow_manage)])
 def create_flow_route(
     request: Request,
     payload: FlowCreatePayload | None = None,
@@ -1906,8 +1938,8 @@ def create_flow_route(
     }
 
 
-@crud_router.put("/{flow_id}")
-@router.put("/{flow_id}")
+@crud_router.put("/{flow_id}", dependencies=[Depends(require_flow_manage)])
+@router.put("/{flow_id}", dependencies=[Depends(require_flow_manage)])
 async def update_flow_route(
     flow_id: str,
     request: Request,
@@ -2052,7 +2084,7 @@ async def update_flow_route(
         )
 
 
-@router.delete("/{flow_id}")
+@router.delete("/{flow_id}", dependencies=[Depends(require_flow_manage)])
 def delete_flow_route(
     flow_id: uuid.UUID,
     request: Request,
@@ -2261,7 +2293,7 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
     return db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
 
 
-@router.get("/tenant/{tenant_id}")
+@router.get("/tenant/{tenant_id}", dependencies=[Depends(require_flow_view)])
 def get_tenant_flow(
     tenant_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -2294,7 +2326,7 @@ def get_tenant_flow(
     }
 
 
-@router.post("/tenant/{tenant_id}")
+@router.post("/tenant/{tenant_id}", dependencies=[Depends(require_flow_manage)])
 def save_tenant_flow(
     tenant_id: str,
     payload: FlowBuilderPayload,
@@ -2332,7 +2364,7 @@ def save_tenant_flow(
     return _normalize_flow_response(graph)
 
 
-@crud_router.post("", response_model=FlowVersionResponse)
+@crud_router.post("", response_model=FlowVersionResponse, dependencies=[Depends(require_flow_manage)])
 def create_tenant_flow(
     payload: FlowCreatePayload,
     request: Request,
@@ -2446,7 +2478,7 @@ def create_tenant_flow(
         )
 
 
-@crud_router.get("")
+@crud_router.get("", dependencies=[Depends(require_flow_view)])
 def list_tenant_flows(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -2456,7 +2488,7 @@ def list_tenant_flows(
     return [_serialize_flow(item, metrics=metrics.get(item.id)) for item in get_flows(db=db, tenant_id=tenant_uuid)]
 
 
-@crud_router.get("/{flow_id}", response_model=FlowVersionResponse)
+@crud_router.get("/{flow_id}", response_model=FlowVersionResponse, dependencies=[Depends(require_flow_view)])
 def get_tenant_flow_by_id(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -2494,7 +2526,7 @@ def get_tenant_flow_by_id(
     )
 
 
-@crud_router.get("/{flow_id}/export")
+@crud_router.get("/{flow_id}/export", dependencies=[Depends(require_flow_view)])
 def export_tenant_flow(
     flow_id: str,
     request: Request,
@@ -2543,7 +2575,7 @@ def export_tenant_flow(
     )
 
 
-@crud_router.get("/{flow_id}/analytics")
+@crud_router.get("/{flow_id}/analytics", dependencies=[Depends(require_flow_view)])
 def get_tenant_flow_analytics(
     flow_id: str,
     period: str = "7d",
@@ -2582,7 +2614,7 @@ def get_tenant_flow_analytics(
     return analytics
 
 
-@crud_router.post("/{flow_id}/save", response_model=FlowVersionResponse)
+@crud_router.post("/{flow_id}/save", response_model=FlowVersionResponse, dependencies=[Depends(require_flow_manage)])
 async def update_tenant_flow(
     flow_id: str,
     request: Request,
@@ -2704,7 +2736,7 @@ async def update_tenant_flow(
         raise HTTPException(status_code=500, detail="Erro interno")
 
 
-@crud_router.delete("/{flow_id}", response_model=DeleteFlowResponse)
+@crud_router.delete("/{flow_id}", response_model=DeleteFlowResponse, dependencies=[Depends(require_flow_manage)])
 def delete_tenant_flow(
     flow_id: str,
     request: Request,
@@ -2772,7 +2804,7 @@ def delete_tenant_flow(
         return {"success": True, "mode": "soft_delete"}
 
 
-@crud_router.put("/{flow_id}/activate")
+@crud_router.put("/{flow_id}/activate", dependencies=[Depends(require_flow_activate)])
 def activate_tenant_flow(
     flow_id: str,
     request: Request,
@@ -2816,7 +2848,7 @@ def activate_tenant_flow(
     return _serialize_flow(flow)
 
 
-@crud_router.post("/deactivate")
+@crud_router.post("/deactivate", dependencies=[Depends(require_flow_activate)])
 def deactivate_tenant_flows(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -2840,7 +2872,7 @@ def deactivate_tenant_flows(
     return {"success": True}
 
 
-@crud_router.patch("/{flow_id}/status")
+@crud_router.patch("/{flow_id}/status", dependencies=[Depends(require_flow_activate)])
 def update_tenant_flow_status(
     flow_id: str,
     payload: FlowStatusPayload,
@@ -2890,7 +2922,7 @@ def update_tenant_flow_status(
     return _serialize_flow(flow)
 
 
-@crud_router.put("/{flow_id}/rename")
+@crud_router.put("/{flow_id}/rename", dependencies=[Depends(require_flow_manage)])
 def rename_tenant_flow(
     flow_id: str,
     payload: RenameFlowPayload,
@@ -2910,7 +2942,7 @@ def rename_tenant_flow(
     )
 
 
-@router.put("/{flow_id}/rename")
+@router.put("/{flow_id}/rename", dependencies=[Depends(require_flow_manage)])
 def rename_flow_route(
     flow_id: str,
     payload: RenameFlowPayload,
@@ -2930,7 +2962,7 @@ def rename_flow_route(
     )
 
 
-@crud_router.post("/{flow_id}/duplicate")
+@crud_router.post("/{flow_id}/duplicate", dependencies=[Depends(require_flow_manage)])
 def duplicate_tenant_flow(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -2949,7 +2981,7 @@ def duplicate_tenant_flow(
     return _serialize_flow(flow)
 
 
-@crud_router.get("/{flow_id}/versions")
+@crud_router.get("/{flow_id}/versions", dependencies=[Depends(require_flow_view)])
 def list_tenant_flow_versions(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -2969,7 +3001,7 @@ def list_tenant_flow_versions(
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
 
 
-@crud_router.get("/{flow_id}/debug-versions")
+@crud_router.get("/{flow_id}/debug-versions", dependencies=[Depends(require_flow_view)])
 def debug_tenant_flow_versions(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3017,7 +3049,7 @@ def debug_tenant_flow_versions(
     }
 
 
-@crud_router.post("/{flow_id}/admin-hard-reset-runtime")
+@crud_router.post("/{flow_id}/admin-hard-reset-runtime", dependencies=[Depends(require_flow_manage)])
 def admin_hard_reset_runtime(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3103,8 +3135,8 @@ def admin_hard_reset_runtime(
     }
 
 
-@crud_router.get("/{flow_id}/admin-runtime-audit")
-@crud_router.get("/{flow_id}/runtime-audit")
+@crud_router.get("/{flow_id}/admin-runtime-audit", dependencies=[Depends(require_flow_view)])
+@crud_router.get("/{flow_id}/runtime-audit", dependencies=[Depends(require_flow_view)])
 def admin_runtime_audit(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3192,7 +3224,7 @@ def admin_runtime_audit(
 
 
 
-@crud_router.get("/{flow_id}/publish-debug")
+@crud_router.get("/{flow_id}/publish-debug", dependencies=[Depends(require_flow_view)])
 def publish_debug(flow_id: str, x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"), db: Session = Depends(get_db)):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
@@ -3213,7 +3245,7 @@ def publish_debug(flow_id: str, x_tenant_id: str | None = Header(default=None, a
             "start_text_preview_mismatch": _extract_start_preview(builder_nodes) != _extract_start_preview(pub_nodes),
         },
     }
-@crud_router.post("/{flow_id}/versions/restore")
+@crud_router.post("/{flow_id}/versions/restore", dependencies=[Depends(require_flow_manage)])
 def restore_tenant_flow_version(
     flow_id: str,
     payload: RestoreFlowVersionPayload,
@@ -3254,7 +3286,7 @@ def restore_tenant_flow_version(
     return _serialize_flow(flow)
 
 
-@crud_router.post("/{flow_id}/restore/{version_id}")
+@crud_router.post("/{flow_id}/restore/{version_id}", dependencies=[Depends(require_flow_manage)])
 def restore_tenant_flow_version_by_path(
     flow_id: str,
     version_id: uuid.UUID,
@@ -3265,7 +3297,7 @@ def restore_tenant_flow_version_by_path(
     return restore_tenant_flow_version(flow_id=flow_id, payload=payload, x_tenant_id=x_tenant_id, db=db)
 
 
-@router.get("/{flow_id}/versions")
+@router.get("/{flow_id}/versions", dependencies=[Depends(require_flow_view)])
 def list_flow_versions_by_id(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3284,7 +3316,7 @@ def list_flow_versions_by_id(
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
 
 
-@router.post("/{flow_id}/restore/{version_id}")
+@router.post("/{flow_id}/restore/{version_id}", dependencies=[Depends(require_flow_manage)])
 def restore_flow_version_by_id(
     flow_id: str,
     version_id: uuid.UUID,
@@ -3319,7 +3351,7 @@ def restore_flow_version_by_id(
     return _serialize_flow(flow)
 
 
-@crud_router.get("/{flow_id}/published-snapshot")
+@crud_router.get("/{flow_id}/published-snapshot", dependencies=[Depends(require_flow_view)])
 def get_published_snapshot(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3357,7 +3389,7 @@ def get_published_snapshot(
     }
 
 
-@crud_router.get("/{flow_id}/runtime-inspector")
+@crud_router.get("/{flow_id}/runtime-inspector", dependencies=[Depends(require_flow_view)])
 def get_runtime_inspector(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3405,7 +3437,7 @@ def get_runtime_inspector(
         "expanded_runtime_graph": {"nodes": expanded_nodes, "edges": expanded_edges},
     }
 
-@crud_router.post("/{flow_id}/publish", response_model=FlowVersionResponse)
+@crud_router.post("/{flow_id}/publish", response_model=FlowVersionResponse, dependencies=[Depends(require_flow_publish)])
 def publish_tenant_flow_version(
     flow_id: str,
     payload: PublishFlowPayload,
@@ -3517,7 +3549,7 @@ def publish_tenant_flow_version(
         )
 
 
-@crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse)
+@crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse, dependencies=[Depends(require_flow_publish)])
 def republish_tenant_flow(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -3550,7 +3582,7 @@ class FlowSimulationPayload(BaseModel):
     message: str | None = None
 
 
-@crud_router.post("/{flow_id}/simulate")
+@crud_router.post("/{flow_id}/simulate", dependencies=[Depends(require_flow_view)])
 async def simulate_tenant_flow(
     flow_id: str,
     payload: FlowSimulationPayload,
