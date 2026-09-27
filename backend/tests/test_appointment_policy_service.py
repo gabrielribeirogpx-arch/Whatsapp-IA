@@ -11,6 +11,33 @@ def test_normalizes_exact_and_periods_without_fixed_offset():
     assert normalize_preferred_period("07/09/2026 às 14:00",p,now=now)["start"] == "2026-09-07T14:00:00-03:00"
     assert normalize_preferred_period("amanhã de manhã",p,now=now)["mode"] == "period"
     assert normalize_preferred_period("07/09/2026",p,now=now)["window_start"].endswith("08:00:00-03:00")
+
+
+@pytest.mark.parametrize(("raw", "mode", "start", "end"), (
+    ("30/09 as 14:00", "exact", "2026-09-30T14:00:00-03:00", "2026-09-30T15:00:00-03:00"),
+    ("30/09 às 14:00", "exact", "2026-09-30T14:00:00-03:00", "2026-09-30T15:00:00-03:00"),
+    ("30/09 às 14h", "exact", "2026-09-30T14:00:00-03:00", "2026-09-30T15:00:00-03:00"),
+    ("amanhã à tarde", "period", "2026-09-28T13:00:00-03:00", "2026-09-28T18:00:00-03:00"),
+    ("segunda de manhã", "period", "2026-09-28T08:00:00-03:00", "2026-09-28T12:00:00-03:00"),
+    ("30/09", "period", "2026-09-30T08:00:00-03:00", "2026-09-30T18:00:00-03:00"),
+))
+def test_appointment_period_always_exposes_canonical_window(raw, mode, start, end):
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,27,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    result=normalize_preferred_period(raw,p,now=now)
+
+    assert result["mode"] == mode
+    assert result["window_start"] == start
+    assert result["window_end"] == end
+    assert result["timezone"] == "America/Sao_Paulo"
+    if mode == "exact":
+        assert result["start"] == start
+        assert result["end"] == end
+    else:
+        assert "start" not in result and "end" not in result
+
+
 def test_rejects_bad_dates_closed_days_and_outside_hours():
     p=policy(); now=datetime(2026,9,1,tzinfo=ZoneInfo("America/Sao_Paulo"))
     for raw in ("31/02/2026", "06/09/2026", "07/09/2026 às 19h", "01/01/2020"):
@@ -49,7 +76,7 @@ def test_policy_rejects_timezone_and_overlaps():
 
 def test_normalizes_weekday_clock_variants():
     p=policy(); now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
-    expected={"mode":"exact","start":"2026-09-07T10:00:00-03:00","end":"2026-09-07T11:00:00-03:00","timezone":"America/Sao_Paulo"}
+    expected={"mode":"exact","window_start":"2026-09-07T10:00:00-03:00","window_end":"2026-09-07T11:00:00-03:00","start":"2026-09-07T10:00:00-03:00","end":"2026-09-07T11:00:00-03:00","timezone":"America/Sao_Paulo"}
     for raw in ("segunda às 10", "segunda as 10", "segunda às 10 horas", "Segunda as 10 horas", "segunda 10h"):
         assert normalize_preferred_period(raw,p,now=now) == expected
     assert normalize_preferred_period("segunda-feira às 10:30",p,now=now)["start"] == "2026-09-07T10:30:00-03:00"
