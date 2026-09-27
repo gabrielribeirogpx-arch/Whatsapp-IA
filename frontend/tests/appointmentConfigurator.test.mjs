@@ -22,6 +22,22 @@ test('save is explicit and activation is blocked by unsaved changes', () => {
   assert.match(client, /Esta configuração foi alterada em outra sessão/);
 });
 
+test('calendar selection is explicit, tenant options come from read model and never autosave', () => {
+  assert.match(api, /available_connections: Array/);
+  assert.match(client, /snapshot\.calendar\.available_connections\.map/);
+  assert.match(client, /Agenda do Google/);
+  assert.match(client, /getGoogleCalendarConnectUrl\(`\/dashboard\/assistants\/appointments\/\$\{installationId\}`\)/);
+  assert.match(helpers, /available_connections\.length === 1/);
+  assert.match(client, /setDirty\(locallyPreselected\)/);
+  assert.doesNotMatch(client, /onChange=\{[^}]*updateAppointmentConfiguration/);
+});
+
+test('configured calendar wins over local single-option preselection', () => {
+  const precedence = helpers.indexOf('snapshot.calendar.connection_id\n    ||');
+  const single = helpers.indexOf('snapshot.calendar.available_connections.length === 1');
+  assert.ok(precedence >= 0 && precedence < single);
+});
+
 test('service identity is retained while labels are edited', () => {
   assert.match(client, /\{ \.\.\.item, label: e\.target\.value \}/);
   assert.match(client, /serviceId\('Novo serviço', form\.services\)/);
