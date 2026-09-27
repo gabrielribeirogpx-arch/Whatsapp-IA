@@ -91,7 +91,13 @@ class AssistantConfigurationUpdate(StrictModel):
 
 class AssistantMaterializationRequest(StrictModel):
     expected_configuration_version: int = Field(ge=1, strict=True)
-    expected_managed_flow_version_id: UUID
+    expected_managed_flow_version_id: UUID | None
+
+
+class AssistantActivationRequest(StrictModel):
+    expected_configuration_version: int = Field(ge=1, strict=True)
+    expected_managed_flow_version_id: UUID | None
+    confirm_replace_active_flow: bool = Field(default=False, strict=True)
 
 
 class AssistantFlowManagementResponse(StrictModel):
@@ -109,6 +115,18 @@ class AssistantMaterializationResponse(StrictModel):
     materialized: bool
     reason: Literal["materialized", "already_up_to_date"]
     flow_version_id: UUID
+    management: AssistantFlowManagementResponse
+
+
+class AssistantActivationResponse(StrictModel):
+    installation_id: UUID
+    flow_id: UUID
+    configuration_version: int
+    flow_version_id: UUID
+    published_version_id: UUID
+    active: bool
+    already_active: bool
+    replaced_active_flow_id: UUID | None
     management: AssistantFlowManagementResponse
 
 

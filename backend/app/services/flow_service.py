@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowStep, FlowVersion, Message
 from app.services.flow_engine_service import apply_flow_version_snapshot_metadata, get_flow_graph, save_flow_graph
+from app.services.flow_engine_service import flow_version_nodes_edges, invalidate_flow_runtime_cache
+from app.flow_v2.publisher import FlowV2Publisher
 from app.services.cache_service import invalidate_tenant_and_flow_cache
 from app.services.flow_activation_service import activate_flow_exclusively, acquire_tenant_flow_activation_lock
 
@@ -196,6 +198,24 @@ class FlowService:
             None,
         )
         invalidate_tenant_and_flow_cache(str(flow.tenant_id))
+
+    def publish_exact_version(self, flow: Flow, flow_version: FlowVersion) -> None:
+        """Validate and publish one caller-selected version without creating a snapshot row."""
+        if flow_version.flow_id != flow.id or flow_version.tenant_id != flow.tenant_id:
+            raise ValueError("flow_version_not_owned_by_flow")
+        nodes, edges = flow_version_nodes_edges(flow_version)
+        published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+        apply_flow_version_snapshot_metadata(
+            flow_version, published.snapshot["nodes"], published.snapshot["edges"]
+        )
+        flow_version.snapshot = published.snapshot
+        flow_version.v2_snapshot_hash = published.v2_snapshot_hash
+        flow_version.v2_snapshot_schema_version = published.snapshot["snapshot_schema_version"]
+        flow_version.start_node_id = published.snapshot["start_node_id"]
+        self.publish_version(flow, flow_version)
+        flow.status = "published"
+        self.db.flush()
+        invalidate_flow_runtime_cache(flow.id)
 
     def get_flow_with_version(self, flow: Flow) -> dict[str, Any]:
         active_version = flow.current_version

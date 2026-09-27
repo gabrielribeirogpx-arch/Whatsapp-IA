@@ -4,7 +4,11 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.assistant_configuration import AssistantConfigurationUpdate, AssistantConfigurationV1
+from app.schemas.assistant_configuration import (
+    AssistantActivationRequest,
+    AssistantConfigurationUpdate,
+    AssistantConfigurationV1,
+)
 
 
 def valid_configuration():
@@ -57,4 +61,38 @@ def test_update_envelope_is_strict_and_requires_expected_version():
             "expected_configuration_version": 0,
             "configuration": valid_configuration(),
             "actor": "forged",
+        })
+
+
+def test_activation_envelope_accepts_only_concurrency_and_confirmation_fields():
+    version_id = uuid4()
+    payload = AssistantActivationRequest.model_validate({
+        "expected_configuration_version": 4,
+        "expected_managed_flow_version_id": str(version_id),
+        "confirm_replace_active_flow": True,
+    })
+    assert payload.expected_managed_flow_version_id == version_id
+    assert payload.confirm_replace_active_flow is True
+
+
+@pytest.mark.parametrize("field", [
+    "flow_id", "flow_version_id", "published_version_id", "nodes", "edges",
+    "checksum", "connection_id", "tool_name", "force", "overwrite",
+])
+def test_activation_envelope_rejects_structural_and_mass_assignment_fields(field):
+    body = {
+        "expected_configuration_version": 4,
+        "expected_managed_flow_version_id": str(uuid4()),
+        field: True,
+    }
+    with pytest.raises(ValidationError):
+        AssistantActivationRequest.model_validate(body)
+
+
+def test_activation_confirmation_is_strict_boolean():
+    with pytest.raises(ValidationError):
+        AssistantActivationRequest.model_validate({
+            "expected_configuration_version": 4,
+            "expected_managed_flow_version_id": None,
+            "confirm_replace_active_flow": 1,
         })

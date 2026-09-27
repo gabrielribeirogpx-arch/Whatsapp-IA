@@ -167,7 +167,7 @@ def detect_flow_drift(
 
 def assert_managed_flow_baseline(
     db: Session, *, installation: MarketplaceInstallation, tenant_id: UUID,
-    expected_managed_flow_version_id: UUID,
+    expected_managed_flow_version_id: UUID | None,
 ) -> FlowManagementState:
     """Concurrency primitive for a future materializer; locks before comparing."""
     state = detect_flow_drift(db, installation=installation, tenant_id=tenant_id, lock=True)
