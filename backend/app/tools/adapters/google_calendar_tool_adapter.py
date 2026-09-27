@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import traceback
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any, Callable
 
 from jsonschema import ValidationError, validate
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.appointment_metadata import (
@@ -18,7 +20,8 @@ from app.core.appointment_metadata import (
     build_appointment_private_metadata,
 )
 from app.core.external_identity import ExternalReferenceError
-from app.services.google_calendar_service import PROVIDER, GoogleCalendarService, _connection_lookup_diagnostics
+from app.models.integration_connection import IntegrationConnection
+from app.services.google_calendar_service import PROVIDER, GoogleCalendarService
 from app.tools.base import NormalizedToolResult, ToolResult
 from app.tools.context import ToolContext, sanitize_metadata
 
@@ -339,28 +342,23 @@ def _calendar_error_data(result: dict[str, Any], tool_result: ToolResult | None 
     error_type = result.get("error_type") or result.get("code") or result.get("status_code") or (tool_result.error_code if tool_result else None) or "google_calendar_error"
     return {"error_type": str(error_type), "error_message": str(message or error_type)}
 
-def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_encrypted_is_not_null": False, "refresh_token_encrypted_is_not_null": False, "access_token_present": False, "refresh_token_present": False}
-    if db is None or tenant_id is None:
+def _connection_log_context(
+    db: Session | None, tenant_id: Any, integration_connection_id: Any = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"integration_connection_id": str(integration_connection_id) if integration_connection_id else None, "provider": PROVIDER, "connected": False, "status": None}
+    if db is None or tenant_id is None or integration_connection_id is None:
         return payload
     try:
-        from app.services.integration_connection_service import IntegrationConnectionService
-
-        payload.update(_connection_lookup_diagnostics(tenant_id, PROVIDER, active_only=True))
-        conn = IntegrationConnectionService(db).get_active_connection(tenant_id, PROVIDER)
-        metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+        conn = db.execute(select(IntegrationConnection).where(
+            IntegrationConnection.id == integration_connection_id,
+            IntegrationConnection.tenant_id == tenant_id,
+            IntegrationConnection.provider == PROVIDER,
+            IntegrationConnection.status == "active",
+        )).scalars().first()
         payload.update({
-            "connection_id": str(conn.id) if conn else None,
-            "connection_tenant_id": str(conn.tenant_id) if conn else None,
-            "account_email": metadata.get("account_email"),
-            "calendar_id": metadata.get("calendar_id") or "primary",
             "provider": conn.provider if conn else PROVIDER,
             "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
             "status": conn.status if conn else None,
-            "access_token_encrypted_is_not_null": bool(conn and conn.access_token_encrypted is not None),
-            "refresh_token_encrypted_is_not_null": bool(conn and conn.refresh_token_encrypted is not None),
-            "access_token_present": bool(conn and conn.access_token_encrypted),
-            "refresh_token_present": bool(conn and conn.refresh_token_encrypted),
         })
     except Exception as exc:
         payload.update({"exception_class": type(exc).__name__, "exception_message": str(exc), "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))})
@@ -379,9 +377,9 @@ def _log_tool(event: str, *, tenant_id: Any, tool_name: str, input: Any, db: Ses
 class GoogleCalendarToolAdapter:
     tool_type = "google_calendar"
 
-    def __init__(self, db: Session | None = None, service_factory: Callable[[Session, Any], GoogleCalendarService] | None = None) -> None:
+    def __init__(self, db: Session | None = None, service_factory: Callable[..., GoogleCalendarService] | None = None) -> None:
         self.db = db
-        self.service_factory = service_factory or (lambda db, tenant_id: GoogleCalendarService(db, tenant_id))
+        self.service_factory = service_factory or GoogleCalendarService
 
     def can_execute(self, tool_id: str, input: Any, context: ToolContext, config: dict[str, Any] | None = None) -> bool:
         return tool_id in GOOGLE_CALENDAR_TOOL_IDS and (self.db or (config or {}).get("db")) is not None and context.tenant_id is not None
@@ -389,9 +387,19 @@ class GoogleCalendarToolAdapter:
     def execute(self, tool_id: str, input: Any, context: ToolContext, config: dict[str, Any] | None = None) -> ToolResult:
         db = self.db or (config or {}).get("db")
         args = input if isinstance(input, dict) else {}
+        bound_tools = {
+            "google_calendar_check_availability",
+            "google_calendar_create_event",
+            "google_calendar_find_managed_appointments",
+            "google_calendar_update_event",
+        }
+        if tool_id in bound_tools and context.integration_connection_id is None:
+            return _calendar_failure(tool_id, "google_calendar_connection_required")
         _log_tool("GOOGLE_CALENDAR_TOOL_START", tenant_id=context.tenant_id, tool_name=tool_id, input=input, db=db)
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
-        connection_context = _connection_log_context(db, context.tenant_id)
+        connection_context = _connection_log_context(
+            db, context.tenant_id, context.integration_connection_id,
+        )
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         validation_schema = (
             GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA
@@ -475,7 +483,15 @@ class GoogleCalendarToolAdapter:
                     normalized_result=normalized,
                 )
         try:
-            service = self.service_factory(db, context.tenant_id)
+            factory_parameters = inspect.signature(self.service_factory).parameters
+            if len(factory_parameters) >= 3:
+                service = self.service_factory(
+                    db, context.tenant_id, context.integration_connection_id,
+                )
+            else:
+                # Test/legacy injection compatibility only. The production
+                # factory always receives the validated connection id.
+                service = self.service_factory(db, context.tenant_id)
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_CALL", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)

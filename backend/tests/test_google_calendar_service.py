@@ -437,3 +437,83 @@ def test_find_managed_appointments_uses_configured_calendar_filters_and_paginati
     assert calls[0][2]["orderBy"] == "startTime"
     assert calls[0][2]["showDeleted"] is False
     assert calls[1][2]["pageToken"] == "page-2"
+
+
+def test_explicit_connection_binding_drives_all_managed_operations(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb()
+    connection_a = _connect(db, tenant_id)
+    connection_a.metadata_json = {"calendar_id": "calendar-A"}
+    connection_a.updated_at = datetime.utcnow() + timedelta(days=1)
+    connection_b = IntegrationConnection(
+        id=uuid.uuid4(), tenant_id=tenant_id, provider="google_calendar",
+        auth_type="oauth2", status="active", access_token_encrypted="token-b",
+        refresh_token_encrypted="refresh-b", metadata_json={"calendar_id": "calendar-B"},
+        updated_at=datetime.utcnow(),
+    )
+    db.connections.append(connection_b)
+    calls = []
+
+    def fake_request(self, method, path, *, params=None, json_body=None, **kwargs):
+        calls.append((method, path, params, json_body))
+        if method == "GET" and path.endswith("/event-1"):
+            return True, {"id": "event-1", "status": "confirmed", "extendedProperties": {"private": {
+                "asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": "patient-B",
+            }}}, 200
+        if method == "GET":
+            return True, {"items": []}, 200
+        if path == "/freeBusy":
+            return True, {"calendars": {"calendar-B": {"busy": []}}}, 200
+        return True, {"id": "event-1", "start": {}, "end": {}}, 200
+
+    monkeypatch.setattr(GoogleCalendarService, "_request", fake_request)
+    monkeypatch.setattr("app.services.appointment_policy_service.policy_for_tenant", lambda *_: {
+        "default_duration_minutes": 30, "slot_interval_minutes": 30,
+        "minimum_notice_minutes": 0, "maximum_advance_days": 90,
+        "working_hours": {}, "blackout_dates": [],
+    })
+    service = GoogleCalendarService(db, tenant_id, integration_connection_id=connection_b.id)
+    assert service.check_availability(start="2027-01-01T10:00:00Z", end="2027-01-01T11:00:00Z")["ok"]
+    assert service.create_event(start="2027-01-01T10:00:00Z", end="2027-01-01T11:00:00Z")["ok"]
+    assert service.find_managed_appointments(start="2027-01-01T00:00:00Z", end="2027-01-02T00:00:00Z", timezone="UTC", patient_ref="patient-B", metadata_schema="appointment-v1")["ok"]
+    assert service.update_event("event-1", expected_private_metadata={"asa_patient_ref": "patient-B"}, start="2027-01-01T12:00:00Z", end="2027-01-01T13:00:00Z")["ok"]
+
+    assert calls[0][3]["items"] == [{"id": "calendar-B"}]
+    assert calls[1][1] == "/calendars/calendar-B/events"
+    assert calls[2][1] == "/calendars/calendar-B/events"
+    assert calls[3][1] == calls[4][1] == "/calendars/calendar-B/events/event-1"
+
+
+@pytest.mark.parametrize("status", ["inactive", "revoked", "disconnected"])
+def test_explicit_binding_never_falls_back_when_selected_connection_is_inactive(status):
+    tenant_id = uuid.uuid4(); db = FakeDb()
+    active = _connect(db, tenant_id)
+    selected = IntegrationConnection(
+        id=uuid.uuid4(), tenant_id=tenant_id, provider="google_calendar",
+        auth_type="oauth2", status=status, updated_at=datetime.utcnow(),
+    )
+    db.connections.extend([selected])
+    service = GoogleCalendarService(db, tenant_id, selected.id)
+    assert service._connection() is None
+    assert service.integration_connection_id != active.id
+
+
+def test_explicit_binding_refresh_updates_only_selected_connection(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb()
+    connection_a = _connect(db, tenant_id)
+    original_a_token = connection_a.access_token_encrypted
+    connection_b = IntegrationConnection(
+        id=uuid.uuid4(), tenant_id=tenant_id, provider="google_calendar",
+        auth_type="oauth2", status="active",
+        access_token_encrypted=IntegrationConnectionService.encrypt_credential("old-b"),
+        refresh_token_encrypted=IntegrationConnectionService.encrypt_credential("refresh-b"),
+        expires_at=datetime.utcnow() - timedelta(minutes=1), updated_at=datetime.utcnow(),
+    )
+    db.connections.append(connection_b)
+    monkeypatch.setattr(
+        "app.services.google_calendar_service.requests.post",
+        lambda *_args, **_kwargs: Resp(200, {"access_token": "new-b", "expires_in": 3600}),
+    )
+    result = GoogleCalendarService(db, tenant_id, connection_b.id).refresh_access_token_if_needed(force=True)
+    assert result == {"ok": True, "refreshed": True}
+    assert IntegrationConnectionService.decrypt_credential(connection_b.access_token_encrypted) == "new-b"
+    assert connection_a.access_token_encrypted == original_a_token

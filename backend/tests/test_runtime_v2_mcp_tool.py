@@ -196,6 +196,7 @@ def test_calendar_mcp_receives_trusted_session_identity_not_variables_or_argumen
     assert context.flow_version_id == session.flow_version_id
     assert context.node_id == node["id"]
     assert context.external_user_id == session.external_user_id
+    assert context.integration_connection_id == db.integration.id
     assert context.tenant_id != malicious_tenant_id
     assert context.contact_id != malicious_contact_id
     assert received["arguments"]["tenant_id"] == str(malicious_tenant_id)

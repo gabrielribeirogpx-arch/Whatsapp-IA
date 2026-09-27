@@ -70,6 +70,9 @@ class FakeDb:
         params = compiled.params
         rows = list(self.connections)
         tenant_id = params.get("tenant_id_1")
+        connection_id = params.get("id_1")
+        if connection_id is not None:
+            rows = [row for row in rows if row.id == connection_id]
         provider = params.get("provider_1")
         if tenant_id is not None:
             rows = [row for row in rows if row.tenant_id == tenant_id]

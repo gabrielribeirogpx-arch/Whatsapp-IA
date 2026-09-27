@@ -92,7 +92,10 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
     """Executes exactly one tenant-authorized tool and selects one branch."""
 
     @staticmethod
-    def _trusted_tool_context(*, snapshot: Any, session: Any, node_id: str) -> ToolContext:
+    def _trusted_tool_context(
+        *, snapshot: Any, session: Any, node_id: str,
+        integration_connection_id: uuid.UUID | None = None,
+    ) -> ToolContext:
         """Build tool identity exclusively from server-owned runtime objects."""
         return ToolContext(
             tenant_id=session.tenant_id,
@@ -104,6 +107,7 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             external_user_id=getattr(session, "external_user_id", None),
             runtime_variables=dict(getattr(session, "variables", None) or {}),
+            integration_connection_id=integration_connection_id,
         )
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
@@ -148,7 +152,14 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
                 if not isinstance(arguments, dict):
                     raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos MCP devem formar um objeto JSON.")
-                context = self._trusted_tool_context(snapshot=snapshot, session=session, node_id=node_id)
+                # Only the canonical id from the tenant/provider/status-scoped
+                # database row becomes trusted execution context.
+                context = self._trusted_tool_context(
+                    snapshot=snapshot,
+                    session=session,
+                    node_id=node_id,
+                    integration_connection_id=integration.id,
+                )
                 result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, context)
                 if not result.ok:
                     error_message = result.error_message

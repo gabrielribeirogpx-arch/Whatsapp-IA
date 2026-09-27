@@ -59,6 +59,24 @@ def test_materialization_changes_only_declared_fields_and_ignores_duration():
     assert changed == ["clinic_name", "google_calendar_connection_id", "handoff.reason", "services"]
 
 
+def test_materialization_binds_every_declared_calendar_target_only():
+    nodes, edges = graph()
+    nodes[2]["data"]["template_node_key"] = "availability"
+    for key, tool in (("create", "google_calendar_create_event"), ("find", "google_calendar_find_managed_appointments"), ("update", "google_calendar_update_event")):
+        nodes.append({"id": key, "type": "mcp_tool", "data": {"template_node_key": key, "connection_id": "integration:old", "tool_name": tool, "arguments": {"keep": True}}})
+    nodes.append({"id": "undeclared", "type": "mcp_tool", "data": {"template_node_key": "other", "connection_id": "integration:old", "tool_name": "unchanged"}})
+    targets = [
+        {"parameter": "google_calendar_connection_id", "node_key": key, "field": "data.connection_id"}
+        for key in ("availability", "create", "find", "update")
+    ]
+    configured = configuration()
+    candidate, _, _ = build_candidate_graph(nodes, edges, configured, targets)
+    expected = f"integration:{configured.google_calendar_connection_id}"
+    assert all(node["data"]["connection_id"] == expected for node in candidate if node["data"].get("template_node_key") in {"availability", "create", "find", "update"})
+    assert candidate[-1]["data"] == nodes[-1]["data"]
+    assert next(node for node in candidate if node["id"] == "create")["data"]["arguments"] == {"keep": True}
+
+
 def test_missing_or_duplicate_stable_node_key_fails_before_mutation():
     nodes, edges = graph()
     with pytest.raises(HTTPException, match="materialization_target_not_found"):

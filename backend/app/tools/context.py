@@ -34,6 +34,9 @@ class ToolContext:
     trace_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     contact_id: Any | None = None
+    # Canonical server-validated integration identity. Credentials never cross
+    # the runtime/tool boundary.
+    integration_connection_id: Any | None = None
     # Snapshot of server-owned session variables; never populated from tool args.
     runtime_variables: dict[str, Any] = field(default_factory=dict)
 
