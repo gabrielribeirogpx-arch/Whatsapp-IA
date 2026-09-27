@@ -18,6 +18,7 @@ from app.services.assistant_configuration_service import (
     serialize_configuration,
     update_configuration,
 )
+from app.services.assistant_flow_management_service import detect_flow_drift
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 class InstallBody(BaseModel):
@@ -138,7 +139,12 @@ def get_assistant_configuration(
         resource_id=installation_id,
     )
     installation = get_installation_for_configuration(db, installation_id, tenant.id)
-    return serialize_configuration(installation)
+    management = detect_flow_drift(
+        db, installation=installation, tenant_id=tenant.id,
+        actor_id=user.id, request=request,
+    )
+    db.commit()
+    return serialize_configuration(installation, management.public_dict())
 
 @router.put("/installations/{installation_id}/configuration", response_model=AssistantConfigurationResponse)
 def put_assistant_configuration(
@@ -160,7 +166,12 @@ def put_assistant_configuration(
         db, installation_id=installation_id, tenant_id=tenant.id,
         actor=user, payload=payload, request=request,
     )
-    return serialize_configuration(installation)
+    management = detect_flow_drift(
+        db, installation=installation, tenant_id=tenant.id,
+        actor_id=user.id, request=request,
+    )
+    db.commit()
+    return serialize_configuration(installation, management.public_dict())
 @router.post("/installations/{installation_id}/retry")
 def retry(installation_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), svc=Depends(service)):
     item = owned(installation_id, db, tenant); svc._event("template_install_retried", item); db.commit(); return output(item)

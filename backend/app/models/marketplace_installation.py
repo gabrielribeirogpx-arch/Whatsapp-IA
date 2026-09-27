@@ -33,6 +33,23 @@ class MarketplaceInstallation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     resources: Mapped[list["MarketplaceInstallationResource"]] = relationship(cascade="all, delete-orphan", back_populates="installation")
     assistant_configuration: Mapped["MarketplaceInstallationAssistantConfiguration | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
+    flow_management: Mapped["MarketplaceInstallationFlowManagement | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
+
+class MarketplaceInstallationFlowManagement(Base):
+    """Server-owned baseline for the Flow created by an installation."""
+    __tablename__ = "marketplace_installation_flow_management"
+    __table_args__ = (
+        CheckConstraint("management_mode IN ('managed', 'customized', 'unknown', 'inconsistent')", name="ck_marketplace_flow_management_mode"),
+        CheckConstraint("(managed_flow_version_id IS NULL) = (managed_graph_checksum IS NULL)", name="ck_marketplace_flow_management_baseline_pair"),
+    )
+    installation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("marketplace_installations.id", ondelete="CASCADE"), primary_key=True)
+    flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, unique=True)
+    management_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown", server_default="unknown")
+    managed_flow_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_versions.id", ondelete="RESTRICT"), nullable=True, index=True)
+    managed_graph_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    installation: Mapped[MarketplaceInstallation] = relationship(back_populates="flow_management")
 
 class MarketplaceInstallationAssistantConfiguration(Base):
     __tablename__ = "marketplace_installation_assistant_configurations"

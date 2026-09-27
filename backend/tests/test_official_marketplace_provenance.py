@@ -7,6 +7,7 @@ import app.services.official_marketplace_template_service as module
 from app.models import (
     Flow,
     MarketplaceInstallation,
+    MarketplaceInstallationFlowManagement,
     MarketplaceInstallationResource,
 )
 from app.models.audit_log import AuditLog
@@ -75,7 +76,8 @@ def _successful_install(monkeypatch, role="owner"):
 
     def publish(_self, session, *, tenant_id, flow_id):
         flow = next(item for item in session.added if isinstance(item, Flow))
-        flow_version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id)
+        flow_version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id, graph_checksum="a" * 64)
+        flow.current_version_id = flow_version.id
         return SimpleNamespace(
             version=flow_version,
             snapshot={"nodes": flow.nodes_json, "edges": flow.edges_json,
@@ -103,6 +105,11 @@ def test_official_install_persists_complete_tenant_scoped_provenance(monkeypatch
     assert resource.resource_type == "flow"
     assert resource.resource_id == str(flow.id)
     assert flow.tenant_id == service.tenant.id
+    baseline = next(item for item in db.added if isinstance(item, MarketplaceInstallationFlowManagement))
+    assert baseline.flow_id == flow.id
+    assert baseline.managed_flow_version_id == uuid.UUID(result["flow_version_id"])
+    assert baseline.managed_graph_checksum == "a" * 64
+    assert baseline.management_mode == "managed"
     assert resource.metadata_json == {
         "ownership": str(installation.id),
         "template_id": str(template.id),
@@ -147,7 +154,9 @@ def test_failure_rolls_back_installation_and_flow(monkeypatch, failure):
 
         def publish(_self, session, *, tenant_id, flow_id):
             flow = next(item for item in session.added if isinstance(item, Flow))
-            return SimpleNamespace(version=SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id), snapshot={"nodes": flow.nodes_json, "edges": [], "start_node_id": flow.nodes_json[0]["id"]})
+            version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id, graph_checksum="a" * 64)
+            flow.current_version_id = version.id
+            return SimpleNamespace(version=version, snapshot={"nodes": flow.nodes_json, "edges": [], "start_node_id": flow.nodes_json[0]["id"]})
 
         monkeypatch.setattr(module.FlowV2PublishService, "publish_draft", publish)
     with pytest.raises(RuntimeError):
