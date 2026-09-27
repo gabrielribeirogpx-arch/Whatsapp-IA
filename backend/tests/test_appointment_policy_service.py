@@ -247,3 +247,35 @@ def test_next_weekday_on_same_weekday_means_following_week():
     now=datetime(2026,9,29,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
     result=normalize_appointment_lookup_period("próxima terça",p,now=now)
     assert result["window_start"] == "2026-10-06T00:00:00-03:00"
+
+
+def test_service_duration_changes_ends_but_not_fifteen_minute_starts():
+    p=policy(slot_interval_minutes=15, business_hours={"monday":[{"start":"09:00","end":"12:00"}], **{day:[] for day in DAYS[1:]}})
+    args={"start":"2026-09-07T09:00:00-03:00","end":"2026-09-07T12:00:00-03:00","timezone":"America/Sao_Paulo","busy":[],"policy":p}
+    consultation=appointments_for_availability(**args,duration_minutes=30)
+    evaluation=appointments_for_availability(**args,duration_minutes=45)
+    assert consultation[0]["end"].endswith("09:30:00-03:00")
+    assert evaluation[0]["end"].endswith("09:45:00-03:00")
+    assert evaluation[1]["start"].endswith("09:15:00-03:00")
+    assert consultation[-1]["end"].endswith("12:00:00-03:00")
+    assert evaluation[-1]["end"].endswith("12:00:00-03:00")
+
+
+def test_service_duration_obeys_busy_boundaries_and_business_hour_end():
+    p=policy(slot_interval_minutes=15,business_hours={"monday":[{"start":"09:00","end":"12:00"}], **{day:[] for day in DAYS[1:]}})
+    slots=appointments_for_availability(start="2026-09-07T09:00:00-03:00",end="2026-09-07T12:00:00-03:00",timezone="America/Sao_Paulo",busy=[{"start":"2026-09-07T10:00:00-03:00","end":"2026-09-07T10:30:00-03:00"}],policy=p,duration_minutes=45)
+    starts={slot["start"][11:16] for slot in slots}
+    assert "09:30" not in starts
+    assert "10:30" in starts
+    assert "11:30" not in starts
+
+
+@pytest.mark.parametrize("minutes,end", [(30,"10:30"),(45,"10:45")])
+def test_exact_requires_end_to_match_service_duration(minutes,end):
+    p=policy(slot_interval_minutes=15)
+    kwargs={"start":"2026-09-07T10:00:00-03:00","timezone":"America/Sao_Paulo","busy":[],"policy":p,"mode":"exact","duration_minutes":minutes}
+    slots=appointments_for_availability(**kwargs,end=f"2026-09-07T{end}:00-03:00")
+    assert slots[0]["end"].endswith(f"{end}:00-03:00")
+    with pytest.raises(AppointmentPolicyError) as error:
+        appointments_for_availability(**kwargs,end="2026-09-07T11:00:00-03:00")
+    assert error.value.code == "appointment_duration_mismatch"

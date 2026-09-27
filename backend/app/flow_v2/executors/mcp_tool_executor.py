@@ -103,6 +103,7 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
             flow_version_id=getattr(session, "flow_version_id", None),
             node_id=node_id,
             external_user_id=getattr(session, "external_user_id", None),
+            runtime_variables=dict(getattr(session, "variables", None) or {}),
         )
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:

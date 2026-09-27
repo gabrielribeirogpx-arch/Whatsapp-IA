@@ -186,14 +186,20 @@ def normalize_appointment_lookup_period(
         "timezone": policy["timezone"],
     }
 
-def appointments_for_availability(*, start: str, end: str, timezone: str, busy: list[dict[str,Any]], policy: dict[str,Any], mode: str="period") -> list[dict[str,Any]]:
+def appointments_for_availability(*, start: str, end: str, timezone: str, busy: list[dict[str,Any]], policy: dict[str,Any], mode: str="period", duration_minutes: int | None=None) -> list[dict[str,Any]]:
     policy=validate_policy(policy); tz=ZoneInfo(timezone)
     begin=datetime.fromisoformat(start).astimezone(tz); finish=datetime.fromisoformat(end).astimezone(tz)
-    duration=timedelta(minutes=policy["default_duration_minutes"]); step=timedelta(minutes=policy["slot_interval_minutes"])
+    effective_minutes = policy["default_duration_minutes"] if duration_minutes is None else duration_minutes
+    if not isinstance(effective_minutes, int) or isinstance(effective_minutes, bool) or effective_minutes <= 0:
+        raise AppointmentPolicyError("invalid_duration", "A duração efetiva é inválida.")
+    duration=timedelta(minutes=effective_minutes); step=timedelta(minutes=policy["slot_interval_minutes"])
     blocked=[(datetime.fromisoformat(x["start"]).astimezone(tz),datetime.fromisoformat(x["end"]).astimezone(tz)) for x in busy]
     def free(a,b): return not any(a < y and b > x for x,y in blocked)
     candidates=[]
-    if mode == "exact": candidates=[begin] if free(begin,finish) and any(begin>=a and finish<=b for a,b in intervals_for_day(begin.date(),policy)) else []
+    if mode == "exact":
+        if finish - begin != duration:
+            raise AppointmentPolicyError("appointment_duration_mismatch", "O fim informado não corresponde à duração do serviço.")
+        candidates=[begin] if free(begin,finish) and any(begin>=a and finish<=b for a,b in intervals_for_day(begin.date(),policy)) else []
     else:
         current_day=begin.date()
         while current_day <= finish.date():
@@ -203,4 +209,4 @@ def appointments_for_availability(*, start: str, end: str, timezone: str, busy: 
                     if free(cursor,cursor+duration): candidates.append(cursor)
                     cursor+=step
             current_day+=timedelta(days=1)
-    return [{"id":x.isoformat(),"label":x.strftime("%d/%m às %H:%M"),"description":f"Consulta de {policy['default_duration_minutes']} minutos","start":x.isoformat(),"end":(x+duration).isoformat(),"timezone":timezone} for x in candidates]
+    return [{"id":x.isoformat(),"label":x.strftime("%d/%m às %H:%M"),"description":f"Consulta de {effective_minutes} minutos","start":x.isoformat(),"end":(x+duration).isoformat(),"timezone":timezone} for x in candidates]
