@@ -10,7 +10,8 @@ from app.routers.account import get_current_user
 from app.services.marketplace_installation_service import MarketplaceInstallationService
 from app.marketplace_assets import ASSETS, ITEMS, MarketplaceGraphValidator
 from app.services.tenant_service import get_current_tenant
-from app.schemas.assistant_configuration import AssistantConfigurationResponse, AssistantConfigurationUpdate
+from app.schemas.assistant_configuration import (AssistantConfigurationResponse, AssistantConfigurationUpdate,
+    AssistantMaterializationRequest, AssistantMaterializationResponse)
 from app.security.workspace_rbac import WorkspacePermission, require_same_tenant
 from app.services.administrative_audit import require_administrative_permission
 from app.services.assistant_configuration_service import (
@@ -19,6 +20,7 @@ from app.services.assistant_configuration_service import (
     update_configuration,
 )
 from app.services.assistant_flow_management_service import detect_flow_drift
+from app.services.assistant_materialization_service import materialize_configuration
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 class InstallBody(BaseModel):
@@ -172,6 +174,23 @@ def put_assistant_configuration(
     )
     db.commit()
     return serialize_configuration(installation, management.public_dict())
+
+@router.post("/installations/{installation_id}/materialize", response_model=AssistantMaterializationResponse)
+def materialize_assistant_configuration(
+    installation_id: UUID, payload: AssistantMaterializationRequest, request: Request,
+    db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
+):
+    require_same_tenant(user, tenant.id)
+    for permission in (WorkspacePermission.MANAGE_SETTINGS, WorkspacePermission.MANAGE_FLOWS):
+        require_administrative_permission(
+            db, user, permission, request=request, action="assistant_configuration_materialized",
+            resource_type="marketplace_installation_flow_management", resource_id=installation_id,
+        )
+    return materialize_configuration(
+        db, installation_id=installation_id, tenant_id=tenant.id, actor_id=user.id,
+        payload=payload, request=request,
+    )
 @router.post("/installations/{installation_id}/retry")
 def retry(installation_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), svc=Depends(service)):
     item = owned(installation_id, db, tenant); svc._event("template_install_retried", item); db.commit(); return output(item)
