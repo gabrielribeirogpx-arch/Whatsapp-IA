@@ -269,6 +269,68 @@ export async function publishFlowAsMarketplaceTemplate(
   return parseApiResponse<MarketplaceTemplateVersion>(response);
 }
 
+export type AppointmentAssistantStatus =
+  | 'needs_configuration' | 'ready_to_activate' | 'active' | 'changes_pending'
+  | 'customized' | 'integration_error' | 'configuration_error';
+export type AppointmentCalendarStatus = 'connected' | 'inactive' | 'missing' | 'not_configured';
+export type AppointmentNoticeCode =
+  | 'assistant_configuration_required' | 'assistant_flow_customized'
+  | 'assistant_calendar_connection_required' | 'assistant_calendar_connection_inactive'
+  | 'assistant_management_unknown' | 'assistant_management_inconsistent'
+  | 'assistant_activation_required' | 'assistant_appointment_policy_invalid';
+
+export type AppointmentServiceConfiguration = { id: string; label: string; duration_minutes: number };
+export type AppointmentHandoffConfiguration = { enabled: boolean; reason: string | null };
+export type AppointmentAssistantConfiguration = {
+  schema_version: 1;
+  clinic_name: string;
+  services: AppointmentServiceConfiguration[];
+  google_calendar_connection_id: string;
+  handoff: AppointmentHandoffConfiguration;
+};
+export type AppointmentConfigurator = {
+  installation_id: string;
+  assistant: { type: 'appointment'; template_id: string; template_version_id: string | null; flow_id: string | null; flow_name: string | null; status: AppointmentAssistantStatus };
+  configuration: { status: 'configured' | 'needs_configuration'; version: number; clinic_name: string | null; services: AppointmentServiceConfiguration[]; handoff: AppointmentHandoffConfiguration | null };
+  calendar: { connection_id: string | null; status: AppointmentCalendarStatus; provider: 'google_calendar' };
+  scheduling: { scope: 'workspace'; timezone: string; business_hours: Record<string, Array<{ start: string; end: string }>>; slot_interval_minutes: number; default_duration_minutes: number } | null;
+  management: { mode: 'managed' | 'customized' | 'unknown' | 'inconsistent'; has_drift: boolean | null };
+  activation: { active: boolean; up_to_date: boolean; needs_activation: boolean; would_replace_active_flow: boolean };
+  actions: { can_edit: boolean; can_activate: boolean; can_open_builder: boolean };
+  concurrency: { configuration_version: number; managed_flow_version_id: string | null };
+  notices: Array<{ code: AppointmentNoticeCode; severity: 'info' | 'warning' | 'error' }>;
+};
+export type AppointmentConfigurationUpdate = { expected_configuration_version: number; configuration: AppointmentAssistantConfiguration };
+export type AppointmentActivationRequest = { expected_configuration_version: number; expected_managed_flow_version_id: string | null; confirm_replace_active_flow: boolean };
+
+export class AppointmentAssistantApiError extends Error {
+  constructor(public readonly status: number, public readonly code: string, message = 'Não foi possível concluir a operação.') {
+    super(message);
+    this.name = 'AppointmentAssistantApiError';
+  }
+}
+
+async function appointmentResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (response.ok) return JSON.parse(text) as T;
+  let code = `http_${response.status}`;
+  try {
+    const value = JSON.parse(text) as { detail?: string | { code?: string }; error?: { code?: string } };
+    code = (typeof value.detail === 'string' ? value.detail : value.detail?.code) || value.error?.code || code;
+  } catch { /* Keep the safe HTTP code; never expose an arbitrary response body. */ }
+  throw new AppointmentAssistantApiError(response.status, code);
+}
+
+export async function getAppointmentConfigurator(installationId: string): Promise<AppointmentConfigurator> {
+  return appointmentResponse(await apiFetch(`/api/marketplace/installations/${encodeURIComponent(installationId)}/configurator`));
+}
+export async function updateAppointmentConfiguration(installationId: string, payload: AppointmentConfigurationUpdate): Promise<void> {
+  await appointmentResponse(await apiFetch(`/api/marketplace/installations/${encodeURIComponent(installationId)}/configuration`, { method: 'PUT', body: JSON.stringify(payload) }));
+}
+export async function activateAppointmentAssistant(installationId: string, payload: AppointmentActivationRequest): Promise<void> {
+  await appointmentResponse(await apiFetch(`/api/marketplace/installations/${encodeURIComponent(installationId)}/activate`, { method: 'POST', body: JSON.stringify(payload) }));
+}
+
 export async function getCurrentBilling(): Promise<CurrentBillingState> { return parseApiResponse<CurrentBillingState>(await apiFetch('/api/billing/current')); }
 export async function getTrialBilling(): Promise<TrialBillingState> { return parseApiResponse<TrialBillingState>(await apiFetch('/api/billing/trial')); }
 export async function listBillingPlans(): Promise<BillingPlan[]> { return parseApiResponse<BillingPlan[]>(await apiFetch('/api/billing/plans')); }

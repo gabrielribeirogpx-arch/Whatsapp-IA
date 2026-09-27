@@ -3119,10 +3119,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     try {
       const variant = selectedVariant || (marketplaceCard.marketplaceType === 'Kit de Negócio' ? 'Sem IA' : marketplaceCard.automationLevel === 'Híbrido' ? 'Híbrida' : marketplaceCard.automationLevel);
       const response = await apiFetch(`/api/marketplace/items/${templateId}/install`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ variant }) });
-      const installed = await parseApiResponse<{ created_resources?: { flows?: string[]; post_install_route?: string } }>(response);
+      const installed = await parseApiResponse<{ id?: string; created_resources?: { flows?: string[]; post_install_route?: string } }>(response);
       const flowId = installed.created_resources?.flows?.[0];
       setIsAgentSystemModalOpen(false);
-      if (marketplaceCard.marketplaceType === 'Kit de Negócio') {
+      let appointmentConfiguratorAvailable = false;
+      if (installed.id) {
+        const configurator = await apiFetch(`/api/marketplace/installations/${encodeURIComponent(installed.id)}/configurator`);
+        appointmentConfiguratorAvailable = configurator.ok;
+      }
+      if (appointmentConfiguratorAvailable && installed.id && window.confirm('Assistente instalado. Deseja configurar o agendamento agora?')) {
+        router.push(`/dashboard/assistants/appointments/${encodeURIComponent(installed.id)}`);
+      } else if (marketplaceCard.marketplaceType === 'Kit de Negócio') {
         router.push(installed.created_resources?.post_install_route || '/dashboard/business-builder');
       } else if (flowId) {
         setSelectedFlowId(flowId);
