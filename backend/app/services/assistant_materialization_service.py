@@ -118,7 +118,7 @@ def build_candidate_graph(
 
 def materialize_configuration(
     db: Session, *, installation_id: UUID, tenant_id: UUID, actor_id: UUID,
-    payload: AssistantMaterializationRequest, request: Request | None,
+    payload: AssistantMaterializationRequest, request: Request | None, commit: bool = True,
 ) -> dict[str, Any]:
     """Run locks, validation, version creation, baseline and audit atomically."""
     try:
@@ -169,7 +169,10 @@ def materialize_configuration(
             raise HTTPException(422, "materialized_flow_invalid")
         checksum = graph_hash(candidate_nodes, candidate_edges)
         if checksum == current.graph_checksum:
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             return _response(installation.id, flow, configuration_row.configuration_version, False, current.id, state.public_dict())
 
         published_id, active = flow.published_version_id, flow.is_active
@@ -191,7 +194,10 @@ def materialize_configuration(
                 "changed_parameters": changed,
             }, request=request,
         )
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         public = {"mode": "managed", "flow_id": flow.id, "managed_flow_version_id": new_version.id,
                   "current_flow_version_id": new_version.id, "has_drift": False}
         return _response(installation.id, flow, configuration_row.configuration_version, True, new_version.id, public)
