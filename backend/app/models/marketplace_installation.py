@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
@@ -32,6 +32,19 @@ class MarketplaceInstallation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     resources: Mapped[list["MarketplaceInstallationResource"]] = relationship(cascade="all, delete-orphan", back_populates="installation")
+    assistant_configuration: Mapped["MarketplaceInstallationAssistantConfiguration | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
+
+class MarketplaceInstallationAssistantConfiguration(Base):
+    __tablename__ = "marketplace_installation_assistant_configurations"
+    __table_args__ = (CheckConstraint("configuration_version >= 1", name="ck_marketplace_assistant_config_version_positive"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    installation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("marketplace_installations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    configuration: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    configuration_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    updated_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenant_users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    installation: Mapped[MarketplaceInstallation] = relationship(back_populates="assistant_configuration")
 
 class MarketplaceInstallationResource(Base):
     __tablename__ = "marketplace_installation_resources"

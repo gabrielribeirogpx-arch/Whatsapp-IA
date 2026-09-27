@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,14 @@ from app.routers.account import get_current_user
 from app.services.marketplace_installation_service import MarketplaceInstallationService
 from app.marketplace_assets import ASSETS, ITEMS, MarketplaceGraphValidator
 from app.services.tenant_service import get_current_tenant
+from app.schemas.assistant_configuration import AssistantConfigurationResponse, AssistantConfigurationUpdate
+from app.security.workspace_rbac import WorkspacePermission, require_same_tenant
+from app.services.administrative_audit import require_administrative_permission
+from app.services.assistant_configuration_service import (
+    get_installation_for_configuration,
+    serialize_configuration,
+    update_configuration,
+)
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 class InstallBody(BaseModel):
@@ -113,6 +121,46 @@ def owned(installation_id, db, tenant):
 @router.get("/installations/{installation_id}")
 def detail(installation_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     return output(owned(installation_id, db, tenant))
+
+@router.get("/installations/{installation_id}/configuration", response_model=AssistantConfigurationResponse)
+def get_assistant_configuration(
+    installation_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
+):
+    require_same_tenant(user, tenant.id)
+    require_administrative_permission(
+        db, user, WorkspacePermission.VIEW_FLOWS, request=request,
+        action="assistant_configuration_viewed",
+        resource_type="marketplace_installation_assistant_configuration",
+        resource_id=installation_id,
+    )
+    installation = get_installation_for_configuration(db, installation_id, tenant.id)
+    return serialize_configuration(installation)
+
+@router.put("/installations/{installation_id}/configuration", response_model=AssistantConfigurationResponse)
+def put_assistant_configuration(
+    installation_id: UUID,
+    payload: AssistantConfigurationUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
+):
+    require_same_tenant(user, tenant.id)
+    require_administrative_permission(
+        db, user, WorkspacePermission.MANAGE_SETTINGS, request=request,
+        action="assistant_configuration_updated",
+        resource_type="marketplace_installation_assistant_configuration",
+        resource_id=installation_id,
+    )
+    installation = update_configuration(
+        db, installation_id=installation_id, tenant_id=tenant.id,
+        actor=user, payload=payload, request=request,
+    )
+    return serialize_configuration(installation)
 @router.post("/installations/{installation_id}/retry")
 def retry(installation_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), svc=Depends(service)):
     item = owned(installation_id, db, tenant); svc._event("template_install_retried", item); db.commit(); return output(item)
