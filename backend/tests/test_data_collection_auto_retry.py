@@ -1,7 +1,11 @@
+from datetime import datetime
 from types import SimpleNamespace
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from app.flow_v2.executors.data_collection_executor import RuntimeV2DataCollectionExecutor
+from app.flow_v2.template_renderer import FlowRenderContext, render_template
+from app.services.appointment_policy_service import DAYS, normalize_preferred_period, validate_policy
 
 
 class Resolver:
@@ -118,6 +122,48 @@ def test_legacy_node_without_prompt_uses_non_empty_fallback():
     started = executor.execute(None, snapshot={}, session=session(), node={'id': 'legacy', 'data': {'variable_name': 'email', 'data_type': 'email'}}, runtime_input=runtime_input())
     assert len(started.actions) == 1
     assert started.actions[0].text.strip() == 'Por favor, informe o dado solicitado.'
+
+
+def test_exact_appointment_period_persists_and_renders_canonical_window(monkeypatch, caplog):
+    appointment_policy = validate_policy({
+        'timezone': 'America/Sao_Paulo',
+        'business_hours': {day: [{'start': '08:00', 'end': '12:00'}, {'start': '13:00', 'end': '18:00'}] for day in DAYS},
+    })
+    base = datetime(2026, 9, 27, 10, tzinfo=ZoneInfo('America/Sao_Paulo'))
+    monkeypatch.setattr('app.services.appointment_policy_service.policy_for_tenant', lambda *_args: appointment_policy)
+    monkeypatch.setattr(
+        'app.flow_v2.data_collection.normalize_preferred_period',
+        lambda value, policy: normalize_preferred_period(value, policy, now=base),
+    )
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=Resolver())
+    current = session()
+    node = {'id': 'new-period', 'data': {'variable_name': 'new_appointment_period', 'data_type': 'appointment_period'}}
+    executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input())
+
+    with caplog.at_level('INFO'):
+        result = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('30/09 as 14:00', 'exact-1'))
+
+    persisted = current.variables['new_appointment_period']
+    assert result.next_source_handle == 'success'
+    assert persisted == {
+        'mode': 'exact',
+        'window_start': '2026-09-30T14:00:00-03:00',
+        'window_end': '2026-09-30T15:00:00-03:00',
+        'start': '2026-09-30T14:00:00-03:00',
+        'end': '2026-09-30T15:00:00-03:00',
+        'timezone': 'America/Sao_Paulo',
+    }
+    rendered = render_template({
+        'start': '{{new_appointment_period.window_start}}',
+        'end': '{{new_appointment_period.window_end}}',
+        'timezone': '{{new_appointment_period.timezone}}',
+    }, FlowRenderContext(tenant_id=current.tenant_id, session=current))
+    assert rendered == {
+        'start': '2026-09-30T14:00:00-03:00',
+        'end': '2026-09-30T15:00:00-03:00',
+        'timezone': 'America/Sao_Paulo',
+    }
+    assert 'event=appointment_period_normalized mode=exact has_window_start=True has_window_end=True has_timezone=True' in caplog.text
 
 
 def test_appointment_semantic_default_preserves_retry_and_invalid_handle(monkeypatch):

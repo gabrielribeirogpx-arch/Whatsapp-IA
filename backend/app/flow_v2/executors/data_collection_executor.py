@@ -124,6 +124,13 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
                 return NodeExecutionResult(actions=(action,), status='complete', next_source_handle='invalid')
             finished = self._finish(db, snapshot, session, context, node_id, data, 'invalid', 'data_collection_completed', runtime_input)
             return NodeExecutionResult(actions=(action, *finished.actions), status=finished.status, next_node_id=finished.next_node_id, next_source_handle='invalid')
+        if data.get('data_type') == 'appointment_period' and isinstance(result.normalized_value, dict):
+            period = result.normalized_value
+            logger.info(
+                'event=appointment_period_normalized mode=%s has_window_start=%s has_window_end=%s has_timezone=%s',
+                period.get('mode'), bool(period.get('window_start')),
+                bool(period.get('window_end')), bool(period.get('timezone')),
+            )
         name = str(data.get('variable_name') or ''); variables = dict(session.variables or {}); variables[name] = result.normalized_value; session.variables = variables
         logger.info(
             'event=RUNTIME_V2_DATA_COLLECTION_SAVE session_id=%s node_id=%s variable_names=%s variable_count=%s render_success=true',

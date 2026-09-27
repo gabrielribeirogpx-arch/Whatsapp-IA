@@ -97,6 +97,12 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     raise AppointmentPolicyError("invalid_period_format", "Use uma data, dia da semana ou período válido.")
 
 def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: datetime | None=None) -> dict[str, Any]:
+    """Normalize a requested appointment into one stable window contract.
+
+    ``window_start`` and ``window_end`` are present for every successful mode.
+    Exact requests also retain the historical ``start``/``end`` fields so
+    existing scheduling flows remain backward compatible.
+    """
     policy=validate_policy(policy); tz=ZoneInfo(policy["timezone"]); raw=_normalize_period_text(text)
     base=(now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz)))
     if not raw: raise AppointmentPolicyError("invalid_period_format", "Informe uma data ou período válido.")
@@ -119,7 +125,15 @@ def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: dateti
             return {"mode":"period","window_start":overlap[0][0].isoformat(),"window_end":overlap[-1][1].isoformat(),"timezone":policy["timezone"]}
         end=start+timedelta(minutes=policy["default_duration_minutes"])
         if not any(start>=a and end<=b for a,b in intervals): raise AppointmentPolicyError("outside_business_hours", "O horário está fora do funcionamento da clínica.")
-        return {"mode":"exact","start":start.isoformat(),"end":end.isoformat(),"timezone":policy["timezone"]}
+        start_iso, end_iso = start.isoformat(), end.isoformat()
+        return {
+            "mode":"exact",
+            "window_start":start_iso,
+            "window_end":end_iso,
+            "start":start_iso,
+            "end":end_iso,
+            "timezone":policy["timezone"],
+        }
     period_match=re.search(r"\b(manha|tarde|noite)\b",raw)
     period=period_match.group(1) if period_match else None
     windows={"manha":(6,12),"tarde":(13,18),"noite":(18,22)}
