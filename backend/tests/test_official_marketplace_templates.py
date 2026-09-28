@@ -183,6 +183,54 @@ def test_timeout_and_error_conditions_remain_functionally_different():
     assert report["differences"][0]["path"] == "edges.data.condition"
 
 
+@pytest.mark.parametrize(("expected", "actual"), [
+    ("timeout", "error"),
+    ("error", "timeout"),
+    ("success", "error"),
+    ("success", "timeout"),
+])
+def test_edge_condition_diagnostic_preserves_strict_safe_branch_values(expected, actual):
+    nodes, edges = representative_49_node_graph()
+    nodes[10]["data"]["credential"] = "credential-must-never-leak"
+    nodes[11]["data"]["content"] = "patient-name-must-never-leak"
+    edge = next(item for item in edges if item["source"] == "node-10")
+    edge["data"] = {"condition": expected}
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    changed = next(item for item in actual_edges if item["source"] == mapping["node-10"])
+    changed["data"]["condition"] = actual
+
+    first = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
+    second = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
+    issue = first["differences"][0]
+
+    assert not first["equivalent"]
+    assert issue["expected"] == {"safe_value": expected}
+    assert issue["actual"] == {"safe_value": actual}
+    assert issue["source_template_node_key"] == "representative.10"
+    assert issue["target_template_node_key"] == "representative.11"
+    assert issue["edge_fingerprint"] == second["differences"][0]["edge_fingerprint"]
+    assert "patient-name-must-never-leak" not in str(first)
+    assert "credential-must-never-leak" not in str(first)
+
+
+def test_arbitrary_edge_condition_is_described_but_never_exposed():
+    nodes, edges = representative_49_node_graph()
+    edge = next(item for item in edges if item["source"] == "node-10")
+    edge.setdefault("data", {})["condition"] = "timeout"
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    secret = "patient-ref-token-credential-123"
+    next(item for item in actual_edges if item["source"] == mapping["node-10"])["data"]["condition"] = secret
+
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
+    descriptor = report["differences"][0]["actual"]
+
+    assert descriptor == {
+        "value_type": "str", "value_length": len(secret),
+        "short_hash": __import__("hashlib").sha256(secret.encode()).hexdigest()[:12],
+    }
+    assert secret not in str(report)
+
+
 def test_marketplace_legacy_boundary_tracks_timeout_edge_through_real_pipeline():
     """Regression for the asymmetric expected-vs-published install comparison."""
     nodes, edges = representative_49_node_graph()
@@ -277,7 +325,7 @@ def test_structural_diagnostic_is_typed_deterministic_and_does_not_expose_conten
     difference = report["differences"][0]
     assert difference["kind"] == "node_attribute_mismatch"
     assert difference["field"] == "data.text"
-    assert difference["actual"]["length"] == len(secret_message)
+    assert difference["actual"]["value_length"] == len(secret_message)
     assert secret_message not in str(report)
 
 
