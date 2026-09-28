@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.flow_v2.publish_service import FlowV2PublishService
+from app.flow_v2.node_handle_contract import migrate_edge_handles
 from app.models import (
     Flow,
     FlowVersion,
@@ -182,6 +183,18 @@ def remap_graph(nodes: list[dict], edges: list[dict]) -> tuple[list[dict], list[
         return copy.deepcopy(value)
 
     return [rewrite(node) for node in nodes], [rewrite(edge) for edge in edges], mapping
+
+
+def publication_boundary_edges(nodes: list[dict], edges: list[dict]) -> list[dict]:
+    """Return the Marketplace graph in the publisher's documented edge form.
+
+    Installation used to compare the stored (possibly legacy) representation
+    directly with the publisher output.  That made the comparison asymmetric:
+    only the installed side had passed through ``migrate_edge_handles``.  Keep
+    this deliberately narrow; it applies the same public boundary operation to
+    the expected side and does not change endpoints or equate branch values.
+    """
+    return migrate_edge_handles(copy.deepcopy(nodes), copy.deepcopy(edges))
 
 
 def structural_diff(expected_nodes: list[dict], expected_edges: list[dict], actual_nodes: list[dict], actual_edges: list[dict], expected_start: str | None = None, actual_start: str | None = None) -> dict:
@@ -514,7 +527,8 @@ class OfficialMarketplaceTemplateService:
             stage = "publish_initial_flow_version"
             result = FlowV2PublishService().publish_draft(self.db, tenant_id=self.tenant.id, flow_id=flow.id)
             stage = "validate_installed_snapshot"
-            report = structural_diff(version.nodes_snapshot, version.edges_snapshot, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
+            expected_edges = publication_boundary_edges(version.nodes_snapshot, version.edges_snapshot)
+            report = structural_diff(version.nodes_snapshot, expected_edges, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
             if not report["equivalent"]: raise ValueError({"code": "installed_snapshot_diverged", "report": report})
             stage = "create_provenance"
             resource = MarketplaceInstallationResource(
