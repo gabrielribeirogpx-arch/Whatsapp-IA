@@ -1,7 +1,8 @@
 import pytest
 
 from app.flow_v2.publisher import FlowV2Publisher
-from app.services.official_marketplace_template_service import remap_graph, sanitize_snapshot, structural_diff
+from app.flow_v2.node_handle_contract import migrate_edge_handles
+from app.services.official_marketplace_template_service import publication_boundary_edges, remap_graph, sanitize_snapshot, structural_diff
 
 
 def graph():
@@ -182,10 +183,64 @@ def test_timeout_and_error_conditions_remain_functionally_different():
     assert report["differences"][0]["path"] == "edges.data.condition"
 
 
+def test_marketplace_legacy_boundary_tracks_timeout_edge_through_real_pipeline():
+    """Regression for the asymmetric expected-vs-published install comparison."""
+    nodes, edges = representative_49_node_graph()
+    mcp = next(node for node in nodes if node["id"] == "node-10")
+    mcp["data"].update({
+        "tool_name": "google_calendar_check_availability",
+        "template_node_key": "assistant.calendar.availability",
+    })
+    timeout = next(edge for edge in edges if edge["source"] == "node-10")
+    timeout.update({
+        "sourceHandle": "tempo_esgotado",
+        "data": {"sourceHandle": "tempo_esgotado", "condition": "tempo_esgotado"},
+    })
+
+    # A: immutable Marketplace payload; B: remap; C/D: the publisher boundary.
+    checkpoint_a = (timeout["sourceHandle"], timeout["data"]["sourceHandle"], timeout["data"]["condition"])
+    remapped_nodes, remapped_edges, mapping = remap_graph(nodes, edges)
+    before = next(edge for edge in remapped_edges if edge["source"] == mapping["node-10"])
+    checkpoint_b = (before["sourceHandle"], before["data"]["sourceHandle"], before["data"]["condition"])
+    migrated = migrate_edge_handles(remapped_nodes, remapped_edges)
+    after = next(edge for edge in migrated if edge["source"] == mapping["node-10"])
+    checkpoint_cd = (before["sourceHandle"], before["data"]["sourceHandle"], before["data"]["condition"],
+                     after["sourceHandle"], after["data"]["sourceHandle"], after["data"]["condition"])
+    published = FlowV2Publisher().publish(nodes=remapped_nodes, edges=remapped_edges).snapshot
+    final = next(edge for edge in published["edges"] if edge["source"] == mapping["node-10"])
+    checkpoint_efg = (final["sourceHandle"], final["data"]["sourceHandle"], final["data"]["condition"])
+
+    assert checkpoint_a == checkpoint_b == ("tempo_esgotado", "tempo_esgotado", "tempo_esgotado")
+    assert checkpoint_cd == ("tempo_esgotado", "tempo_esgotado", "tempo_esgotado", "timeout", "timeout", "timeout")
+    assert checkpoint_efg == ("timeout", "timeout", "timeout")
+    expected_edges = publication_boundary_edges(nodes, edges)
+    assert structural_diff(nodes, expected_edges, published["nodes"], published["edges"],
+                           "node-0", published["start_node_id"])["equivalent"]
+
+
+@pytest.mark.parametrize(("expected", "actual"), [
+    ("timeout", "error"), ("error", "timeout"),
+    ("success", "error"), ("success", "timeout"),
+])
+def test_publication_boundary_never_equates_distinct_mcp_branches(expected, actual):
+    nodes, edges = representative_49_node_graph()
+    edge = next(item for item in edges if item["source"] == "node-10")
+    edge.update({"sourceHandle": expected, "data": {"sourceHandle": expected, "condition": expected}})
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    changed = next(item for item in actual_edges if item["source"] == mapping["node-10"])
+    changed["sourceHandle"] = actual
+    changed["data"]["sourceHandle"] = actual
+    changed["data"]["condition"] = actual
+
+    report = structural_diff(nodes, publication_boundary_edges(nodes, edges), actual_nodes, actual_edges,
+                             "node-0", mapping["node-0"])
+    assert not report["equivalent"]
+
+
 @pytest.mark.parametrize("mutation", [
     "content", "position", "sourceHandle", "targetHandle", "condition", "remove_edge", "add_edge",
     "remove_node", "add_node", "wrong_target", "tool_name", "arguments", "result_variable", "choice_option",
-    "template_node_key",
+    "template_node_key", "source", "data.condition", "data.sourceHandle",
 ])
 def test_structural_comparator_rejects_required_functional_divergences(mutation):
     nodes, edges = graph()
@@ -207,6 +262,9 @@ def test_structural_comparator_rejects_required_functional_divergences(mutation)
     elif mutation == "result_variable": actual_nodes[0]["data"]["result_variable"] = "other"
     elif mutation == "choice_option": actual_nodes[0]["data"]["options"][0]["label"] = "Não"
     elif mutation == "template_node_key": actual_nodes[0]["data"]["template_node_key"] = "assistant.other"
+    elif mutation == "source": actual_edges[0]["source"] = mapping["end"]
+    elif mutation == "data.condition": actual_edges[0].setdefault("data", {})["condition"] = "error"
+    elif mutation == "data.sourceHandle": actual_edges[0].setdefault("data", {})["sourceHandle"] = "error"
     assert not structural_diff(nodes, edges, actual_nodes, actual_edges, "start", mapping.get("start"))["equivalent"]
 
 
