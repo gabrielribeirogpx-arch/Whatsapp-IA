@@ -1,6 +1,6 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -39,7 +39,21 @@ class ComposerDraft(BaseModel):
     knowledge: list[str] = []
     methodologies: list[str] = []
 
+class AssistantTemplateMapping(BaseModel):
+    """The only graph references a browser may submit during promotion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clinic_name_node_id: UUID
+    clinic_name_field: str
+    services_node_id: UUID
+    calendar_node_ids: list[UUID] = Field(min_length=1)
+    handoff_node_ids: list[UUID] = Field(min_length=1)
+
+
 class PromoteTemplateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     category: str
@@ -51,6 +65,8 @@ class PromoteTemplateBody(BaseModel):
     status: str = "draft"
     version: str = Field(min_length=1, max_length=32)
     slug: str | None = None
+    template_kind: str = "flow"
+    assistant_mapping: AssistantTemplateMapping | None = None
 
 def official_service(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     return OfficialMarketplaceTemplateService(db, tenant, user)

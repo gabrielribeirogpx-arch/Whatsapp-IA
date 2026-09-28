@@ -4731,6 +4731,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <PublishMarketplaceTemplateModal
           flowId={selectedFlowId}
           flowName={selectedFlow?.name || 'Novo template'}
+          nodes={nodes.map((node) => ({ id: node.id, type: node.type, data: node.data as Record<string, unknown> }))}
           onClose={() => setIsPublishTemplateOpen(false)}
           onPublished={toast.success}
         />

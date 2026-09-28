@@ -22,6 +22,8 @@ from app.models import (
 )
 from app.models.audit_log import AuditLog
 from app.services.assistant_flow_management_service import establish_official_baseline
+from app.services.assistant_configuration_service import CAPABILITY
+from app.services.assistant_materialization_service import _contract
 
 STATUSES = {"draft", "preview_only", "published"}
 MODALITIES = {"Sem IA", "Híbrido", "IA Completa", "Sistema Completo"}
@@ -36,6 +38,13 @@ PLACEHOLDERS = {
     "integration_id": "{{integration.connection}}",
 }
 PRIVATE_URL = re.compile(r"^https?://(?:localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)", re.I)
+GOOGLE_CALENDAR_TOOLS = {
+    "google_calendar_check_availability", "google_calendar_create_event",
+    "google_calendar_find_managed_appointments", "google_calendar_update_event",
+    "google_calendar_list_events", "calendar.get_availability",
+    "calendar.create_appointment", "calendar.get_appointment",
+    "calendar.reschedule_appointment", "calendar.cancel_appointment",
+}
 
 
 def sanitize_snapshot(value: Any, key: str | None = None) -> Any:
@@ -49,6 +58,77 @@ def sanitize_snapshot(value: Any, key: str | None = None) -> Any:
     if isinstance(value, str) and PRIVATE_URL.match(value):
         return "{{integration.private_url}}"
     return copy.deepcopy(value)
+
+
+def _assistant_contract(nodes: list[dict], mapping) -> tuple[list[dict], dict]:
+    """Validate an explicit product mapping and enrich only its snapshot copy."""
+    if not mapping.calendar_node_ids:
+        raise ValueError("assistant_calendar_mapping_required")
+    if not mapping.handoff_node_ids:
+        raise ValueError("assistant_handoff_mapping_required")
+    by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
+    selected_ids = [str(mapping.clinic_name_node_id), str(mapping.services_node_id)]
+    selected_ids += [str(value) for value in mapping.calendar_node_ids]
+    selected_ids += [str(value) for value in mapping.handoff_node_ids]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("assistant_mapping_node_roles_must_be_unique")
+    if any(node_id not in by_id for node_id in selected_ids):
+        raise ValueError("assistant_mapping_node_not_found")
+    if len(mapping.calendar_node_ids) != len(set(mapping.calendar_node_ids)) or len(mapping.handoff_node_ids) != len(set(mapping.handoff_node_ids)):
+        raise ValueError("assistant_mapping_duplicate_node")
+
+    clinic = by_id[str(mapping.clinic_name_node_id)]
+    if clinic.get("type") != "message" or mapping.clinic_name_field not in {"data.message", "data.content", "data.text"}:
+        raise ValueError("assistant_clinic_name_target_invalid")
+    clinic_field = mapping.clinic_name_field.split(".", 1)[1]
+    if not isinstance(clinic.get("data"), dict) or clinic_field not in clinic["data"]:
+        raise ValueError("assistant_clinic_name_target_invalid")
+
+    services = by_id[str(mapping.services_node_id)]
+    services_data = services.get("data") if isinstance(services.get("data"), dict) else {}
+    result_variable = services_data.get("result_variable")
+    if services.get("type") != "choice" or services_data.get("options_mode", "fixed") != "fixed":
+        raise ValueError("assistant_services_target_invalid")
+    if not isinstance(result_variable, str) or not result_variable.strip() or len(result_variable.strip()) > 120:
+        raise ValueError("assistant_service_selection_variable_invalid")
+
+    calendars = [by_id[str(value)] for value in mapping.calendar_node_ids]
+    for node in calendars:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if node.get("type") != "mcp_tool" or data.get("tool_name") not in GOOGLE_CALENDAR_TOOLS or "connection_id" not in data:
+            raise ValueError("assistant_calendar_target_invalid")
+    handoffs = [by_id[str(value)] for value in mapping.handoff_node_ids]
+    for node in handoffs:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if node.get("type") != "action" or data.get("action_type", data.get("action")) != "transfer_human" or "reason" not in data:
+            raise ValueError("assistant_handoff_target_invalid")
+
+    roles = [(clinic, "clinic_name", mapping.clinic_name_field, "assistant.clinic_name"),
+             (services, "services", "data.options", "assistant.services")]
+    roles += [(node, "google_calendar_connection_id", "data.connection_id", f"assistant.calendar.{index + 1}") for index, node in enumerate(calendars)]
+    roles += [(node, "handoff.reason", "data.reason", f"assistant.handoff.{index + 1}") for index, node in enumerate(handoffs)]
+    assigned_keys = {key for _, _, _, key in roles}
+    for node in nodes:
+        key = (node.get("data") or {}).get("template_node_key") if isinstance(node, dict) else None
+        if key in assigned_keys and all(node is not selected for selected, _, _, _ in roles):
+            raise ValueError("assistant_template_node_key_duplicate")
+    targets = []
+    for node, parameter, field, key in roles:
+        node.setdefault("data", {})["template_node_key"] = key
+        if parameter == "google_calendar_connection_id":
+            node["data"]["connection_id"] = "{{integration.connection}}"
+        targets.append({"parameter": parameter, "node_key": key, "field": field})
+    final_keys = [
+        node.get("data", {}).get("template_node_key") for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("data"), dict)
+        and isinstance(node["data"].get("template_node_key"), str)
+    ]
+    if len(final_keys) != len(set(final_keys)):
+        raise ValueError("assistant_template_node_key_duplicate")
+    contract = {"schema_version": 1, "service_selection_variable": result_variable.strip(), "targets": targets}
+    # Reuse the materializer's canonical parser before persisting anything.
+    _contract(type("PromotionVersion", (), {"manifest": {"capabilities": [CAPABILITY], "assistant_materialization": contract}})())
+    return nodes, contract
 
 
 def remap_graph(nodes: list[dict], edges: list[dict]) -> tuple[list[dict], list[dict], dict[str, str]]:
@@ -119,6 +199,18 @@ class OfficialMarketplaceTemplateService:
         start = snapshot.get("start_node_id") or source.start_node_id
         manifest = sanitize_snapshot({k: v for k, v in snapshot.items() if k not in {"nodes", "edges"}})
         manifest.update({"name": payload.name, "description": payload.description, "category": payload.category, "segment": payload.segment, "modality": payload.modality, "level": payload.level, "estimated_time": payload.estimated_time, "tags": payload.tags, "runtime": flow.runtime, "start_node_id": start})
+        if payload.template_kind not in {"flow", "appointment_assistant"}:
+            raise ValueError("invalid_template_kind")
+        if payload.template_kind == "flow" and payload.assistant_mapping is not None:
+            raise ValueError("assistant_mapping_not_allowed")
+        if payload.template_kind == "appointment_assistant":
+            if payload.assistant_mapping is None:
+                raise ValueError("assistant_mapping_required")
+            nodes, contract = _assistant_contract(nodes, payload.assistant_mapping)
+            capabilities = manifest.get("capabilities", [])
+            capabilities = list(capabilities) if isinstance(capabilities, list) else []
+            manifest["capabilities"] = list(dict.fromkeys([*capabilities, CAPABILITY]))
+            manifest["assistant_materialization"] = contract
         slug = payload.slug or re.sub(r"[^a-z0-9]+", "-", payload.name.lower()).strip("-")
         template = self.db.scalar(select(MarketplaceTemplate).where(MarketplaceTemplate.slug == slug))
         if template is None:
@@ -180,7 +272,10 @@ class OfficialMarketplaceTemplateService:
                 self.db, installation=installation, flow=flow,
                 flow_version=result.version, checksum=result.version.graph_checksum,
             )
-            installation.created_resources = {"flows": [str(flow.id)]}
+            assistant = CAPABILITY in version.manifest.get("capabilities", [])
+            post_install_route = (f"/dashboard/assistants/appointments/{installation.id}" if assistant
+                                  else f"/dashboard/flow-builder?flow_id={flow.id}")
+            installation.created_resources = {"flows": [str(flow.id)], "post_install_route": post_install_route}
             installation.status = "completed"
             installation.completed_at = datetime.utcnow()
             self.db.add(AuditLog(
@@ -198,7 +293,7 @@ class OfficialMarketplaceTemplateService:
                 },
             ))
             self.db.commit()
-            return {"installation_id": str(installation.id), "flow_id": str(flow.id), "flow_version_id": str(result.version.id), "template_version_id": str(version.id), "id_mapping": mapping, "validation": report, "post_install_route": f"/dashboard/flow-builder?flow_id={flow.id}"}
+            return {"installation_id": str(installation.id), "flow_id": str(flow.id), "flow_version_id": str(result.version.id), "template_version_id": str(version.id), "id_mapping": mapping, "validation": report, "post_install_route": post_install_route}
         except Exception:
             # Installation, flow, initial version, provenance resource and audit
             # record form one unit. Never retain a partially installed template.

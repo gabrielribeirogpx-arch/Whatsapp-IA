@@ -30,6 +30,16 @@
 .marketplace-version { max-width: 220px; }
 .marketplace-version small { color: #94a3b8; font-weight: 400; line-height: 1.35; }
 .marketplace-publish-error { border: 1px solid #fecaca; border-radius: 10px; padding: 10px 12px; background: #fff1f2; color: #b91c1c; font-size: 13px; }
+.marketplace-template-kind { display: grid; gap: 9px; border: 0; padding: 0; }
+.marketplace-template-kind legend { margin-bottom: 7px; color: #334155; font-size: 12px; font-weight: 700; }
+.marketplace-template-kind label { grid-template-columns: auto 1fr; align-items: start; border: 1px solid #e2e8f0; border-radius: 11px; padding: 11px; cursor: pointer; }
+.marketplace-template-kind input, .marketplace-node-check input { width: auto; margin-top: 2px; }
+.marketplace-template-kind span { display: grid; gap: 3px; }
+.marketplace-template-kind small, .marketplace-assistant-map small { color: #64748b; font-weight: 400; }
+.marketplace-assistant-map { display: grid; gap: 13px; border: 1px solid #a7f3d0; border-radius: 13px; padding: 15px; background: #f0fdf9; }
+.marketplace-assistant-map > p { margin: 0; color: #047857; font-size: 13px; }
+.marketplace-assistant-map > div { display: grid; gap: 7px; color: #334155; font-size: 12px; }
+.marketplace-node-check { grid-template-columns: auto 1fr !important; align-items: start; border-radius: 8px; padding: 7px; background: #fff; }
 .marketplace-publish-modal footer { display: flex; justify-content: flex-end; gap: 10px; padding: 17px 26px; border-top: 1px solid #eef2f7; background: #f8fafc; border-radius: 0 0 22px 22px; }
 .marketplace-publish-modal footer button { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 640px) { .marketplace-publish-backdrop { padding: 0; align-items: end; } .marketplace-publish-modal { max-height: 94vh; border-radius: 22px 22px 0 0; } .marketplace-publish-modal header, .marketplace-publish-body { padding-left: 18px; padding-right: 18px; } .marketplace-publish-grid { grid-template-columns: 1fr; } .marketplace-publish-modal footer { position: sticky; bottom: 0; padding: 14px 18px; } }
