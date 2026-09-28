@@ -40,15 +40,41 @@ def get_node_handle_contract(node: dict[str, Any]) -> dict[str, list[str]]:
 
 def migrate_edge_handles(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Rewrite legacy aliases at the load/save boundary without changing branch semantics."""
+    node_types = {
+        str(node.get("id")): str(node.get("type") or (node.get("data") or {}).get("type") or "").strip().lower()
+        for node in nodes
+        if isinstance(node, dict)
+    }
     migrated = []
     for original in normalize_data_collection_edges(nodes, edges):
         edge = dict(original)
-        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        data = dict(edge.get("data")) if isinstance(edge.get("data"), dict) else {}
         source_raw = edge.get("sourceHandle", data.get("sourceHandle", data.get("source_handle")))
         target_raw = edge.get("targetHandle", data.get("targetHandle", data.get("target_handle")))
         if source_raw not in (None, ""):
-            edge["sourceHandle"] = normalize_handle(source_raw)
+            canonical_source = normalize_handle(source_raw)
+            edge["sourceHandle"] = canonical_source
+            # Old MCP edges duplicated the routing handle in data.condition.
+            # Normalize that duplicate only when it is the *same legacy alias*
+            # as sourceHandle.  A distinct condition (notably timeout vs error)
+            # remains distinct and is never treated as equivalent.
+            condition = data.get("condition")
+            if (
+                node_types.get(str(edge.get("source"))) == "mcp_tool"
+                and isinstance(condition, str)
+                and condition.strip().lower() == str(source_raw).strip().lower()
+                and condition.strip().lower() in LEGACY_HANDLE_ALIASES
+            ):
+                data["condition"] = canonical_source
+            for key in ("sourceHandle", "source_handle"):
+                if key in data and str(data[key]).strip().lower() == str(source_raw).strip().lower():
+                    data[key] = canonical_source
         if target_raw not in (None, ""):
             edge["targetHandle"] = normalize_handle(target_raw)
+            for key in ("targetHandle", "target_handle"):
+                if key in data and str(data[key]).strip().lower() == str(target_raw).strip().lower():
+                    data[key] = edge["targetHandle"]
+        if data or isinstance(edge.get("data"), dict):
+            edge["data"] = data
         migrated.append(edge)
     return migrated

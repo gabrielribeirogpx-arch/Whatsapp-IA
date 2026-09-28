@@ -141,6 +141,47 @@ def test_representative_49_50_remap_publish_pipeline_accepts_only_runtime_false_
     assert mapping["node-0"] == published["start_node_id"]
 
 
+def test_representative_install_pipeline_canonicalizes_only_proven_mcp_alias():
+    nodes, edges = representative_49_node_graph()
+    timeout_edge = next(edge for edge in edges if edge["source"] == "node-10")
+    timeout_edge.update({
+        "sourceHandle": "tempo_esgotado",
+        "data": {"condition": "tempo_esgotado", "sourceHandle": "tempo_esgotado"},
+    })
+    remapped_nodes, remapped_edges, mapping = remap_graph(nodes, edges)
+    published = FlowV2Publisher().publish(nodes=remapped_nodes, edges=remapped_edges).snapshot
+
+    # Capture the value at every real stage: Marketplace -> remap -> publisher.
+    assert timeout_edge["data"]["condition"] == "tempo_esgotado"
+    assert next(edge for edge in remapped_edges if edge["source"] == mapping["node-10"])["data"]["condition"] == "tempo_esgotado"
+    installed = next(edge for edge in published["edges"] if edge["source"] == mapping["node-10"])
+    assert installed["sourceHandle"] == "timeout"
+    assert installed["data"]["condition"] == "timeout"
+
+    # Compare against the same closed canonical representation used by Runtime
+    # V2; structural comparison itself remains strict.
+    expected = FlowV2Publisher().publish(nodes=nodes, edges=edges).snapshot
+    report = structural_diff(
+        expected["nodes"], expected["edges"], published["nodes"], published["edges"],
+        expected["start_node_id"], published["start_node_id"],
+    )
+    assert report == {"equivalent": True, "differences": [], "counts": {"nodes": 49, "edges": 50}}
+
+
+def test_timeout_and_error_conditions_remain_functionally_different():
+    nodes, edges = representative_49_node_graph()
+    edge = next(edge for edge in edges if edge["source"] == "node-10")
+    edge.update({"sourceHandle": "timeout", "data": {"condition": "timeout"}})
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    next(edge for edge in actual_edges if edge["source"] == mapping["node-10"])["data"]["condition"] = "error"
+
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
+
+    assert not report["equivalent"]
+    assert report["differences"][0]["kind"] == "edge_relation_mismatch"
+    assert report["differences"][0]["path"] == "edges.data.condition"
+
+
 @pytest.mark.parametrize("mutation", [
     "content", "position", "sourceHandle", "targetHandle", "condition", "remove_edge", "add_edge",
     "remove_node", "add_node", "wrong_target", "tool_name", "arguments", "result_variable", "choice_option",
