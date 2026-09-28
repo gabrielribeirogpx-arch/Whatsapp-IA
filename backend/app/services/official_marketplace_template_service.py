@@ -39,6 +39,7 @@ PLACEHOLDERS = {
     "provider_id": "{{provider.whatsapp}}", "phone_number_id": "{{provider.phone_number_id}}",
     "integration_id": "{{integration.connection}}",
 }
+CLINIC_NAME_TEXT_FIELDS = frozenset({"data.message", "data.content", "data.text"})
 PRIVATE_URL = re.compile(r"^https?://(?:localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)", re.I)
 GOOGLE_CALENDAR_TOOLS = {
     "google_calendar_check_availability", "google_calendar_create_event",
@@ -92,7 +93,7 @@ def _assistant_contract(nodes: list[dict], mapping) -> tuple[list[dict], dict]:
         raise ValueError("assistant_mapping_duplicate_node")
 
     clinic = by_id[str(mapping.clinic_name_node_id)]
-    if clinic.get("type") != "message" or mapping.clinic_name_field not in {"data.message", "data.content", "data.text"}:
+    if clinic.get("type") != "message" or mapping.clinic_name_field not in CLINIC_NAME_TEXT_FIELDS:
         raise ValueError("assistant_clinic_name_target_invalid")
     clinic_field = mapping.clinic_name_field.split(".", 1)[1]
     if not isinstance(clinic.get("data"), dict) or clinic_field not in clinic["data"]:
@@ -301,8 +302,17 @@ class OfficialMarketplaceTemplateService:
         self._access()
         if payload.status not in STATUSES or payload.modality not in MODALITIES: raise ValueError("invalid_template_metadata")
         flow = self.db.scalar(select(Flow).where(Flow.id == flow_id, Flow.tenant_id == self.tenant.id, Flow.is_deleted.is_(False)))
-        if not flow or not flow.published_version_id: raise LookupError("published_flow_not_found")
-        source = self.db.scalar(select(FlowVersion).where(FlowVersion.id == flow.published_version_id, FlowVersion.flow_id == flow.id, FlowVersion.is_published.is_(True)))
+        if not flow or not flow.current_version_id: raise LookupError("published_flow_not_found")
+        # Saving in the Builder creates a new immutable FlowVersion and advances
+        # current_version_id without publishing/activating it. Promotion must use
+        # that saved snapshot rather than silently validating an older runtime
+        # publication. Creating the Marketplace version has no effect on either
+        # Flow publication pointer.
+        source = self.db.scalar(select(FlowVersion).where(
+            FlowVersion.id == flow.current_version_id,
+            FlowVersion.flow_id == flow.id,
+            FlowVersion.tenant_id == self.tenant.id,
+        ))
         if not source: raise LookupError("published_snapshot_not_found")
         snapshot = copy.deepcopy(source.snapshot or {})
         nodes = sanitize_snapshot(snapshot.get("nodes", source.nodes or []))

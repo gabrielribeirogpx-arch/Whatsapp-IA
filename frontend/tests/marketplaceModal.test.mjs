@@ -5,6 +5,8 @@ import { extname, join } from 'node:path';
 const root = new URL('..', import.meta.url);
 const modal = await readFile(new URL('../components/ai-store/AIStoreModal.tsx', import.meta.url), 'utf8');
 const card = await readFile(new URL('../components/ai-store/AIStoreCard.tsx', import.meta.url), 'utf8');
+const publishModal = await readFile(new URL('../components/flows/PublishMarketplaceTemplateModal.tsx', import.meta.url), 'utf8');
+const api = await readFile(new URL('../lib/api.ts', import.meta.url), 'utf8');
 const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
 const forbiddenLabel = ['Minimi', 'zar'].join('');
 
@@ -32,6 +34,10 @@ assert.match(modal, /previous\?\.focus\(\)/, 'focus returns to the opener when t
 assert.match(modal, /className="ai-store-modal-body"/, 'catalog has a dedicated scrolling region');
 assert.match(card, />Visualizar e aprender</, 'details CTA remains in every card');
 assert.match(card, />Instalar</, 'install CTA remains in every card');
+assert.match(publishModal, /const clinicField = 'data\.content' as const/, 'builder submits the canonical MessageNode field');
+assert.match(publishModal, /<option value="data\.content">Mensagem<\/option>/, 'friendly message label maps to canonical content path');
+assert.doesNotMatch(publishModal, /<option value="data\.(?:message|text)">/, 'unsupported choices are not offered for current MessageNodes');
+assert.match(api, /clinic_name_field: 'data\.content'/, 'frontend request DTO exposes only the canonical field');
 
 assert.match(css, /height:min\(90dvh,860px\);max-height:calc\(100dvh - 32px\)/, 'desktop dialog uses the viewport-safe height contract');
 assert.match(css, /\.ai-store-modal-body\{[^}]*min-height:0;[^}]*flex:1;[^}]*overflow-y:auto;[^}]*padding:[^}]*32px/, 'only the catalog grows and scrolls, with safe bottom padding');
