@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import uuid
+from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
 
@@ -161,34 +162,125 @@ def remap_graph(nodes: list[dict], edges: list[dict]) -> tuple[list[dict], list[
 
 
 def structural_diff(expected_nodes: list[dict], expected_edges: list[dict], actual_nodes: list[dict], actual_edges: list[dict], expected_start: str | None = None, actual_start: str | None = None) -> dict:
-    """Compare logical graphs while ignoring regenerated graph IDs and timestamps."""
+    """Compare attributed graphs up to a bijective renaming of graph IDs.
+
+    Publication sorts UUID-bearing objects, so array position cannot identify a
+    node.  Colour refinement supplies topology-aware candidate classes and the
+    small constrained search below proves an exact isomorphism.  The final
+    comparison includes every non-volatile node/edge property (including visual
+    position, handles and conditions).
+    """
     ignored = {"created_at", "updated_at", "published_at", "timestamp"}
-
-    def canonical(nodes: list[dict], edges: list[dict]) -> dict:
-        aliases = {str(node.get("id")): f"node:{index}" for index, node in enumerate(nodes)}
-        def clean(value: Any, key: str | None = None) -> Any:
-            if key in ignored: return None
-            if isinstance(value, dict): return {k: clean(v, k) for k, v in value.items() if k not in ignored}
-            if isinstance(value, list): return [clean(v, key) for v in value]
-            return aliases.get(value, value) if isinstance(value, str) and key not in {"sourceHandle", "targetHandle", "option_id", "optionId"} else value
-        # Only graph-resource IDs are regenerated. Nested IDs (notably choice
-        # option IDs) are part of the runtime contract and remain comparable.
-        return {
-            "nodes": [clean({k: v for k, v in n.items() if k != "id"}) for n in nodes],
-            "edges": [clean({k: v for k, v in e.items() if k != "id"}) for e in edges],
-        }
-
-    expected, actual = canonical(expected_nodes, expected_edges), canonical(actual_nodes, actual_edges)
     differences = []
     if len(expected_nodes) != len(actual_nodes): differences.append({"path": "nodes.length", "expected": len(expected_nodes), "actual": len(actual_nodes)})
     if len(expected_edges) != len(actual_edges): differences.append({"path": "edges.length", "expected": len(expected_edges), "actual": len(actual_edges)})
-    if expected_start is not None and actual_start is not None:
-        expected_index = next((i for i, n in enumerate(expected_nodes) if str(n.get("id")) == str(expected_start)), None)
-        actual_index = next((i for i, n in enumerate(actual_nodes) if str(n.get("id")) == str(actual_start)), None)
-        if expected_index != actual_index: differences.append({"path": "start_node", "expected": expected_index, "actual": actual_index})
-    for section in ("nodes", "edges"):
-        for index, (left, right) in enumerate(zip(expected[section], actual[section])):
-            if left != right: differences.append({"path": f"{section}[{index}]", "expected": left, "actual": right})
+    if differences:
+        return {"equivalent": False, "differences": differences, "counts": {"nodes": len(actual_nodes), "edges": len(actual_edges)}}
+
+    def graph(nodes: list[dict], edges: list[dict], start: str | None):
+        ids = [str(node.get("id")) for node in nodes]
+        if len(ids) != len(set(ids)):
+            return None
+        id_set = set(ids)
+        relations: list[tuple[str, str, str]] = []
+
+        def clean(value: Any, key: str | None = None, path: str = "") -> Any:
+            if isinstance(value, dict):
+                return {k: clean(v, k, f"{path}.{k}") for k, v in value.items() if k not in ignored}
+            if isinstance(value, list):
+                return [clean(v, key, f"{path}[{i}]") for i, v in enumerate(value)]
+            if isinstance(value, str) and value in id_set and key not in {"sourceHandle", "targetHandle", "source_handle", "target_handle", "option_id", "optionId"}:
+                return {"$node_ref": path}
+            return value
+
+        attrs = {}
+        for node in nodes:
+            node_id = str(node["id"])
+            attrs[node_id] = json.dumps(clean({k: v for k, v in node.items() if k != "id"}), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+            def references(value: Any, key: str | None = None, path: str = "node") -> None:
+                if isinstance(value, dict):
+                    for k, v in value.items():
+                        if k not in ignored and k != "id": references(v, k, f"{path}.{k}")
+                elif isinstance(value, list):
+                    for i, item in enumerate(value): references(item, key, f"{path}[{i}]")
+                elif isinstance(value, str) and value in id_set and key not in {"sourceHandle", "targetHandle", "source_handle", "target_handle", "option_id", "optionId"}:
+                    relations.append((node_id, value, f"ref:{path}"))
+            references(node)
+
+        for edge in edges:
+            source, target = str(edge.get("source")), str(edge.get("target"))
+            if source not in id_set or target not in id_set:
+                return None
+            label = json.dumps(clean({k: v for k, v in edge.items() if k not in {"id", "source", "target"}}), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            relations.append((source, target, f"edge:{label}"))
+        return ids, attrs, relations, str(start) if start is not None else None
+
+    left, right = graph(expected_nodes, expected_edges, expected_start), graph(actual_nodes, actual_edges, actual_start)
+    mapping = None
+    if left is not None and right is not None:
+        left_ids, left_attrs, left_rel, left_start = left
+        right_ids, right_attrs, right_rel, right_start = right
+        left_colors = {node: (left_attrs[node], node == left_start) for node in left_ids}
+        right_colors = {node: (right_attrs[node], node == right_start) for node in right_ids}
+        for _ in range(len(left_ids) + 1):
+            combined = [("l", left_ids, left_colors, left_rel), ("r", right_ids, right_colors, right_rel)]
+            # A shared palette is essential: independently numbered colours are not comparable.
+            signatures = {}
+            for side, ids, colors, relations in combined:
+                incoming, outgoing = defaultdict(list), defaultdict(list)
+                for source, target, label in relations:
+                    outgoing[source].append((label, colors[target])); incoming[target].append((label, colors[source]))
+                for node in ids: signatures[(side, node)] = (colors[node], tuple(sorted(outgoing[node])), tuple(sorted(incoming[node])))
+            palette = {signature: index for index, signature in enumerate(sorted(set(signatures.values()), key=repr))}
+            next_left = {node: palette[signatures[("l", node)]] for node in left_ids}
+            next_right = {node: palette[signatures[("r", node)]] for node in right_ids}
+            if next_left == left_colors and next_right == right_colors: break
+            left_colors, right_colors = next_left, next_right
+
+        if Counter(left_colors.values()) == Counter(right_colors.values()):
+            right_by_color = defaultdict(list)
+            for node in right_ids: right_by_color[right_colors[node]].append(node)
+            left_rel_count, right_rel_count = Counter(left_rel), Counter(right_rel)
+            relation_labels = {relation[2] for relation in left_rel + right_rel}
+
+            def exact_payload_match(candidate_mapping: dict[str, str]) -> bool:
+                inverse = {actual: expected for expected, actual in candidate_mapping.items()}
+
+                def canonical(nodes, edges, aliases):
+                    def clean(value: Any, key: str | None = None) -> Any:
+                        if isinstance(value, dict):
+                            return {k: clean(v, k) for k, v in value.items() if k not in ignored}
+                        if isinstance(value, list): return [clean(item, key) for item in value]
+                        if isinstance(value, str) and value in aliases and key not in {"sourceHandle", "targetHandle", "source_handle", "target_handle", "option_id", "optionId"}:
+                            return aliases[value]
+                        return value
+                    normalized_nodes = [clean(node) for node in nodes]
+                    normalized_edges = [clean({k: v for k, v in edge.items() if k != "id"}) for edge in edges]
+                    return (sorted(normalized_nodes, key=lambda item: str(item.get("id"))),
+                            sorted(normalized_edges, key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False)))
+
+                expected_aliases = {node: node for node in left_ids}
+                return canonical(expected_nodes, expected_edges, expected_aliases) == canonical(actual_nodes, actual_edges, inverse)
+
+            def search(current: dict[str, str]) -> dict[str, str] | None:
+                if len(current) == len(left_ids):
+                    mapped = Counter((current[s], current[t], label) for s, t, label in left_rel)
+                    return current if mapped == right_rel_count and exact_payload_match(current) else None
+                unused = set(right_ids) - set(current.values())
+                node = min((n for n in left_ids if n not in current), key=lambda n: sum(c in unused for c in right_by_color[left_colors[n]]))
+                for candidate in sorted(right_by_color[left_colors[node]]):
+                    if candidate not in unused: continue
+                    trial = {**current, node: candidate}
+                    if all(left_rel_count[(a, b, label)] == right_rel_count[(trial[a], trial[b], label)]
+                           for a in trial for b in trial for label in relation_labels):
+                        found = search(trial)
+                        if found is not None: return found
+                return None
+            mapping = search({})
+
+    if mapping is None:
+        differences.append({"path": "graph", "expected": "isomorphic attributed graph", "actual": "structural divergence"})
     return {"equivalent": not differences, "differences": differences, "counts": {"nodes": len(actual_nodes), "edges": len(actual_edges)}}
 
 
