@@ -109,10 +109,10 @@ class TemplateCertificationService:
             issue = {key: difference[key] for key in (
                 "path", "kind", "node_type", "template_node_key", "field", "edge_fingerprint",
                 "source_type", "source_template_node_key", "target_type", "target_template_node_key",
-                "expected", "actual",
+                "expected", "actual", "candidate_count",
             ) if key in difference and difference[key] is not None}
             issue["code"] = "template_snapshot_diverged"
-            if difference.get("kind") == "edge_relation_mismatch":
+            if difference.get("kind") in {"edge_relation_mismatch", "ambiguous_edge_pairing"}:
                 log_payload = {
                     "event": "template_certification_structural_mismatch",
                     "certification_version": CERTIFICATION_VERSION,
@@ -121,6 +121,7 @@ class TemplateCertificationService:
                     **{key: difference[key] for key in (
                         "kind", "path", "edge_fingerprint", "source_type", "source_template_node_key",
                         "target_type", "target_template_node_key", "expected_checkpoint", "actual_checkpoint",
+                        "candidate_count",
                     ) if key in difference and difference[key] is not None},
                 }
                 logger.warning("template_certification_structural_mismatch %s",

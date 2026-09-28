@@ -336,3 +336,70 @@ def test_explicit_true_mcp_permission_remains_a_functional_divergence():
     report = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
     assert not report["equivalent"]
     assert report["differences"][0]["kind"] == "node_attribute_mismatch"
+
+
+def sibling_branch_graph():
+    nodes = [
+        {"id": "tool", "type": "mcp_tool", "position": {"x": 0, "y": 0},
+         "data": {"template_node_key": "assistant.calendar.3", "credential": "oauth-secret-token"}},
+        {"id": "message-error", "type": "message", "position": {"x": 10, "y": 10},
+         "data": {"content": "Patient Ada, ref patient-123"}},
+        {"id": "message-timeout", "type": "message", "position": {"x": 10, "y": 10},
+         "data": {"content": "Patient Ada, ref patient-123"}},
+    ]
+    edges = [
+        {"id": "a-timeout", "source": "tool", "target": "message-timeout",
+         "data": {"condition": "timeout"}},
+        {"id": "b-error", "source": "tool", "target": "message-error",
+         "data": {"condition": "error"}},
+    ]
+    return nodes, edges
+
+
+def test_sibling_branches_with_anonymous_targets_ignore_edge_order_without_false_diagnostic():
+    nodes, edges = sibling_branch_graph()
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    actual_edges.reverse()
+
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "tool", mapping["tool"])
+
+    assert report == {"equivalent": True, "differences": [], "counts": {"nodes": 3, "edges": 2}}
+
+
+def test_sibling_branch_diagnostic_never_invents_timeout_error_pairing():
+    nodes, edges = sibling_branch_graph()
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    timeout = next(edge for edge in actual_edges if edge["target"] == mapping["message-timeout"])
+    timeout["data"]["condition"] = "invalid"
+    actual_edges.reverse()
+
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "tool", mapping["tool"])
+    issue = report["differences"][0]
+
+    assert not report["equivalent"]
+    assert issue["kind"] == "ambiguous_edge_pairing"
+    assert issue["candidate_count"] == 2
+    assert "expected" not in issue
+    assert "actual" not in issue
+
+
+def test_ambiguous_sibling_pairing_is_explicit_and_diagnostic_is_secret_free():
+    nodes, edges = sibling_branch_graph()
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    for edge in actual_edges:
+        edge["data"]["condition"] = "error"
+    actual_edges.reverse()
+
+    first = structural_diff(nodes, edges, actual_nodes, actual_edges, "tool", mapping["tool"])
+    second = structural_diff(nodes, edges, actual_nodes, actual_edges, "tool", mapping["tool"])
+    issue = first["differences"][0]
+
+    assert not first["equivalent"]
+    assert issue["kind"] == "ambiguous_edge_pairing"
+    assert issue["candidate_count"] == 2
+    assert issue["source_template_node_key"] == "assistant.calendar.3"
+    assert issue["target_type"] == "message"
+    assert issue["edge_fingerprint"] == second["differences"][0]["edge_fingerprint"]
+    serialized = str(first).lower()
+    for secret in ("patient ada", "patient-123", "oauth", "secret", "token", "credential"):
+        assert secret not in serialized

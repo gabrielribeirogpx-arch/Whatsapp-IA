@@ -372,8 +372,12 @@ def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes
             pass
         return result
 
-    def edge_fingerprint(source_identity, target_identity, field):
-        material = json.dumps({"source": source_identity, "target": target_identity, "relation": field},
+    def edge_fingerprint(source_identity, target_identity, field, source_signature=None, target_signature=None):
+        # The signatures are hashes of canonical attributes and topology only.
+        # They distinguish otherwise anonymous endpoints without ever exposing
+        # message text, credentials, references, or other node payload values.
+        material = json.dumps({"source": source_identity, "target": target_identity, "relation": field,
+                               "source_signature": source_signature, "target_signature": target_signature},
                               sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(material.encode()).hexdigest()[:20]
 
@@ -426,8 +430,12 @@ def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes
         if candidate is None:
             expected_count = sum(identity(item) == identity(node) for item in expected_nodes if isinstance(item, dict))
             actual_count = sum(identity(item) == identity(node) for item in actual_nodes if isinstance(item, dict))
-            return {"path": "graph", "kind": "unmatched_node_class", "node_type": identity(node)["type"],
-                    "template_node_key": identity(node).get("template_node_key"), "expected_count": expected_count, "actual_count": actual_count}
+            if expected_count != actual_count:
+                return {"path": "graph", "kind": "unmatched_node_class", "node_type": identity(node)["type"],
+                        "template_node_key": identity(node).get("template_node_key"), "expected_count": expected_count, "actual_count": actual_count}
+            # Equal anonymous classes cannot safely be paired by array order.
+            # Defer them to the topology-aware edge diagnostic below.
+            continue
         found = first_difference(node, candidate)
         if found:
             field, expected, actual = found
@@ -437,38 +445,109 @@ def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes
                     "expected_node": identity(node), "candidate_node": identity(candidate), "field": field,
                     "expected": safe_value(expected), "actual": safe_value(actual)}
 
-    # Attribute-compatible nodes but incompatible topology/edge payload.
+    # Attribute-compatible nodes but incompatible topology/edge payload.  This
+    # deliberately uses an edge-label-free projection of the same canonical
+    # graph information used by the isomorphism search.  Relation values are
+    # omitted so that a single relation mismatch does not destroy endpoint
+    # compatibility; canonical node attributes, degree and neighbourhood remain.
     expected_by_id = {str(n.get("id")): n for n in expected_nodes if isinstance(n, dict)}
     actual_by_id = {str(n.get("id")): n for n in actual_nodes if isinstance(n, dict)}
+
+    def endpoint_signatures(nodes_by_id, edges, graph_ids):
+        incoming, outgoing = defaultdict(list), defaultdict(list)
+        for item in edges:
+            if not isinstance(item, dict):
+                continue
+            source, target = str(item.get("source")), str(item.get("target"))
+            if source in nodes_by_id and target in nodes_by_id:
+                outgoing[source].append(target)
+                incoming[target].append(source)
+
+        def canonical_node(node):
+            def clean(value, key=None):
+                if isinstance(value, dict):
+                    return {k: clean(v, k) for k, v in value.items() if k not in ignored and k != "id"}
+                if isinstance(value, list):
+                    return [clean(item, key) for item in value]
+                if isinstance(value, str) and value in graph_ids and key not in {
+                    "sourceHandle", "targetHandle", "source_handle", "target_handle", "option_id", "optionId",
+                }:
+                    return {"$node_ref": True}
+                return value
+            material = json.dumps(clean(node), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            return hashlib.sha256(material.encode()).hexdigest()
+
+        base = {node_id: canonical_node(node) for node_id, node in nodes_by_id.items()}
+        return {
+            node_id: hashlib.sha256(json.dumps({
+                "attribute": base[node_id],
+                "in_degree": len(incoming[node_id]), "out_degree": len(outgoing[node_id]),
+                "incoming": sorted(base[other] for other in incoming[node_id]),
+                "outgoing": sorted(base[other] for other in outgoing[node_id]),
+            }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:20]
+            for node_id in nodes_by_id
+        }
+
+    expected_signatures = endpoint_signatures(expected_by_id, expected_edges, expected_ids)
+    actual_signatures = endpoint_signatures(actual_by_id, actual_edges, actual_ids)
+
+    def relation_payload(edge):
+        return {k: v for k, v in edge.items() if k not in {"id", "source", "target"}}
+
+    def all_differences(left, right, path=""):
+        if isinstance(left, dict) and isinstance(right, dict):
+            result = []
+            for key in sorted((set(left) | set(right)) - ignored):
+                child = f"{path}.{key}" if path else key
+                if key not in left or key not in right:
+                    result.append((child, left.get(key), right.get(key)))
+                else:
+                    result.extend(all_differences(left[key], right[key], child))
+            return result
+        if isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
+            return [item for index, pair in enumerate(zip(left, right))
+                    for item in all_differences(pair[0], pair[1], f"{path}[{index}]")]
+        return [] if left == right else [(path, left, right)]
+
+    def ambiguous(source_identity, target_identity, candidates, source_signature, target_signature):
+        return {"path": "edges.relation", "kind": "ambiguous_edge_pairing",
+                "source_type": source_identity["type"],
+                "source_template_node_key": source_identity.get("template_node_key"),
+                "target_type": target_identity["type"],
+                "target_template_node_key": target_identity.get("template_node_key"),
+                "candidate_count": len(candidates),
+                "edge_fingerprint": edge_fingerprint(source_identity, target_identity, "ambiguous",
+                                                     source_signature, target_signature)}
+
     for edge in sorted((e for e in expected_edges if isinstance(e, dict)), key=lambda e: str(e.get("id") or "")):
-        source, target = expected_by_id.get(str(edge.get("source"))), expected_by_id.get(str(edge.get("target")))
+        source_id, target_id = str(edge.get("source")), str(edge.get("target"))
+        source, target = expected_by_id.get(source_id), expected_by_id.get(target_id)
         source_identity, target_identity = identity(source or {}), identity(target or {})
+        source_signature, target_signature = expected_signatures.get(source_id), expected_signatures.get(target_id)
         candidates = [item for item in actual_edges if isinstance(item, dict)
-                      and identity(actual_by_id.get(str(item.get("source")), {})) == source_identity
-                      and identity(actual_by_id.get(str(item.get("target")), {})) == target_identity]
-        if candidates:
-            found = first_difference({k: v for k, v in edge.items() if k not in {"id", "source", "target"}},
-                                     {k: v for k, v in candidates[0].items() if k not in {"id", "source", "target"}})
-            if found:
-                field, expected, actual = found
-                structural = field in {"sourceHandle", "data.sourceHandle", "condition", "data.condition"}
-                return {"path": f"edges.{field}", "kind": "edge_relation_mismatch",
-                        "edge_fingerprint": edge_fingerprint(source_identity, target_identity, field),
-                        "source_type": source_identity["type"],
-                        "source_template_node_key": source_identity.get("template_node_key"),
-                        "target_type": target_identity["type"],
-                        "target_template_node_key": target_identity.get("template_node_key"),
-                        "field": field, "expected": safe_value(expected, structural=structural),
-                        "actual": safe_value(actual, structural=structural),
-                        "expected_checkpoint": structural_checkpoint(edge),
-                        "actual_checkpoint": structural_checkpoint(candidates[0])}
-        else:
-            return {"path": "edges.relation", "kind": "edge_relation_mismatch", "source_type": source_identity["type"],
+                      and actual_signatures.get(str(item.get("source"))) == source_signature
+                      and actual_signatures.get(str(item.get("target"))) == target_signature]
+        comparisons = [(candidate, all_differences(relation_payload(edge), relation_payload(candidate)))
+                       for candidate in candidates]
+        if any(not changes for _, changes in comparisons):
+            continue
+        single_field = [(candidate, changes[0]) for candidate, changes in comparisons if len(changes) == 1]
+        if len(single_field) == 1:
+            candidate, (field, expected, actual) = single_field[0]
+            structural = field in {"sourceHandle", "data.sourceHandle", "condition", "data.condition"}
+            return {"path": f"edges.{field}", "kind": "edge_relation_mismatch",
+                    "edge_fingerprint": edge_fingerprint(source_identity, target_identity, field,
+                                                         source_signature, target_signature),
+                    "source_type": source_identity["type"],
                     "source_template_node_key": source_identity.get("template_node_key"),
                     "target_type": target_identity["type"],
                     "target_template_node_key": target_identity.get("template_node_key"),
-                    "edge_fingerprint": edge_fingerprint(source_identity, target_identity, "source|target"),
-                    "field": "source|target", "expected_checkpoint": structural_checkpoint(edge)}
+                    "field": field, "expected": safe_value(expected, structural=structural),
+                    "actual": safe_value(actual, structural=structural),
+                    "expected_checkpoint": structural_checkpoint(edge),
+                    "actual_checkpoint": structural_checkpoint(candidate)}
+        return ambiguous(source_identity, target_identity, candidates,
+                         source_signature, target_signature)
     return {"path": "graph", "kind": "unmatched_node_class", "node_type": "unknown", "expected_count": len(expected_nodes), "actual_count": len(actual_nodes)}
 
 
