@@ -260,6 +260,32 @@ def test_failure_rolls_back_installation_and_flow(monkeypatch, failure):
     assert db.commits == 0
 
 
+def test_functional_snapshot_divergence_rolls_back_and_logs_only_safe_diagnostic(monkeypatch, caplog):
+    template, version = _published_template()
+    db = FakeDB(version)
+    service = _service(db)
+
+    def publish(_self, session, *, tenant_id, flow_id):
+        flow = next(item for item in session.added if isinstance(item, Flow))
+        changed = [dict(node, data={**node["data"], "text": "patient secret must not be logged"}) for node in flow.nodes_json]
+        flow_version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id, graph_checksum="a" * 64)
+        return SimpleNamespace(version=flow_version, snapshot={"nodes": changed, "edges": flow.edges_json,
+                                                               "start_node_id": changed[0]["id"]})
+
+    monkeypatch.setattr(module.FlowV2PublishService, "publish_draft", publish)
+    with pytest.raises(ValueError) as exc_info:
+        service.install(template.slug)
+
+    payload = exc_info.value.args[0]
+    assert payload["code"] == "installed_snapshot_diverged"
+    assert payload["report"]["differences"][0]["kind"] == "node_attribute_mismatch"
+    assert db.rollbacks == 1
+    assert db.commits == 0
+    assert "structural_diff_kind=node_attribute_mismatch" in caplog.text
+    assert "structural_diff_path=nodes.data.text" in caplog.text
+    assert "patient secret" not in caplog.text
+
+
 def test_provenance_loader_reconstructs_exact_chain_and_is_tenant_safe(monkeypatch):
     service, db, template, version, result = _successful_install(monkeypatch)
     installation = next(item for item in db.added if isinstance(item, MarketplaceInstallation))

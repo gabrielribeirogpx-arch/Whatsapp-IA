@@ -62,6 +62,22 @@ def _install_error_code(exc: Exception) -> str:
     return type(exc).__name__
 
 
+def _install_structural_log_fields(exc: Exception) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Extract only allow-listed structural metadata from an install error."""
+    payload = exc.args[0] if isinstance(exc, ValueError) and exc.args and isinstance(exc.args[0], dict) else {}
+    report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+    difference = (report.get("differences") or [{}])[0]
+    if not isinstance(difference, dict):
+        difference = {}
+    expected_node = difference.get("expected_node") if isinstance(difference.get("expected_node"), dict) else {}
+    actual_node = difference.get("candidate_node") if isinstance(difference.get("candidate_node"), dict) else {}
+    return (
+        difference.get("kind"), difference.get("path"),
+        expected_node.get("type") or difference.get("node_type"), actual_node.get("type"),
+        expected_node.get("template_node_key") or difference.get("template_node_key"),
+    )
+
+
 def sanitize_snapshot(value: Any, key: str | None = None) -> Any:
     """Deep-copy the canonical contract, replacing only tenant-bound values."""
     if key in SENSITIVE_KEYS:
@@ -178,6 +194,22 @@ def structural_diff(expected_nodes: list[dict], expected_edges: list[dict], actu
     position, handles and conditions).
     """
     ignored = {"created_at", "updated_at", "published_at", "timestamp"}
+    # FlowV2Publisher makes these security defaults explicit.  A missing value
+    # and literal False have identical runtime meaning (only ``is True`` grants
+    # either permission), so normalize precisely this publisher-created shape.
+    # No other absent/null/default values are collapsed here.
+    mcp_false_defaults = ("allow_external_write", "destructive_confirmed")
+
+    def normalize_publisher_defaults(node: dict) -> dict:
+        normalized = copy.deepcopy(node)
+        data = normalized.get("data")
+        if str(normalized.get("type") or "").lower() == "mcp_tool" and isinstance(data, dict):
+            for field in mcp_false_defaults:
+                data.setdefault(field, False)
+        return normalized
+
+    expected_nodes = [normalize_publisher_defaults(node) if isinstance(node, dict) else node for node in expected_nodes]
+    actual_nodes = [normalize_publisher_defaults(node) if isinstance(node, dict) else node for node in actual_nodes]
     differences = []
     if len(expected_nodes) != len(actual_nodes): differences.append({"path": "nodes.length", "expected": len(expected_nodes), "actual": len(actual_nodes)})
     if len(expected_edges) != len(actual_edges): differences.append({"path": "edges.length", "expected": len(expected_edges), "actual": len(actual_edges)})
@@ -287,8 +319,109 @@ def structural_diff(expected_nodes: list[dict], expected_edges: list[dict], actu
             mapping = search({})
 
     if mapping is None:
-        differences.append({"path": "graph", "expected": "isomorphic attributed graph", "actual": "structural divergence"})
+        differences.append(_diagnose_structural_divergence(
+            expected_nodes, expected_edges, actual_nodes, actual_edges, ignored,
+        ))
     return {"equivalent": not differences, "differences": differences, "counts": {"nodes": len(actual_nodes), "edges": len(actual_edges)}}
+
+
+def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes, actual_edges, ignored) -> dict:
+    """Return one deterministic, production-safe explanation of a mismatch."""
+    expected_ids = {str(node.get("id")) for node in expected_nodes if isinstance(node, dict)}
+    actual_ids = {str(node.get("id")) for node in actual_nodes if isinstance(node, dict)}
+
+    def identity(node):
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        result = {"type": str(node.get("type") or "")}
+        key = data.get("template_node_key")
+        if isinstance(key, str):
+            result["template_node_key"] = key
+        return result
+
+    def safe_value(value):
+        result = {"type": type(value).__name__}
+        if isinstance(value, str):
+            result.update(length=len(value), sha256=hashlib.sha256(value.encode()).hexdigest()[:12])
+        elif isinstance(value, (list, dict)):
+            result["length"] = len(value)
+        elif value is None or isinstance(value, (bool, int, float)):
+            result["value"] = value
+        return result
+
+    def first_difference(left, right, path=""):
+        if isinstance(left, dict) and isinstance(right, dict):
+            keys = sorted((set(left) | set(right)) - ignored - ({"id"} if not path else set()))
+            for key in keys:
+                child = f"{path}.{key}" if path else key
+                if key not in left or key not in right:
+                    return child, left.get(key), right.get(key)
+                found = first_difference(left[key], right[key], child)
+                if found:
+                    return found
+            return None
+        if isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                return path, left, right
+            for index, (a, b) in enumerate(zip(left, right)):
+                found = first_difference(a, b, f"{path}[{index}]")
+                if found:
+                    return found
+            return None
+        if isinstance(left, str) and isinstance(right, str) and left in expected_ids and right in actual_ids:
+            # Both values are graph references. Their endpoint compatibility is
+            # diagnosed from topology below, never from regenerated UUID text.
+            return None
+        return (path, left, right) if left != right else None
+
+    def candidate_for(node):
+        wanted = identity(node)
+        keyed = [item for item in actual_nodes if isinstance(item, dict) and identity(item) == wanted]
+        if len(keyed) == 1:
+            return keyed[0]
+        same_type = [item for item in actual_nodes if isinstance(item, dict) and str(item.get("type") or "") == wanted["type"]]
+        position = node.get("position")
+        positioned = [item for item in same_type if item.get("position") == position]
+        return positioned[0] if len(positioned) == 1 else (same_type[0] if len(same_type) == 1 else None)
+
+    for node in sorted((n for n in expected_nodes if isinstance(n, dict)), key=lambda n: json.dumps(identity(n), sort_keys=True)):
+        candidate = candidate_for(node)
+        if candidate is None:
+            expected_count = sum(identity(item) == identity(node) for item in expected_nodes if isinstance(item, dict))
+            actual_count = sum(identity(item) == identity(node) for item in actual_nodes if isinstance(item, dict))
+            return {"path": "graph", "kind": "unmatched_node_class", "node_type": identity(node)["type"],
+                    "template_node_key": identity(node).get("template_node_key"), "expected_count": expected_count, "actual_count": actual_count}
+        found = first_difference(node, candidate)
+        if found:
+            field, expected, actual = found
+            expected_ref = isinstance(expected, str) and expected in expected_ids
+            actual_ref = isinstance(actual, str) and actual in actual_ids
+            return {"path": f"nodes.{field}", "kind": "internal_reference_mismatch" if expected_ref or actual_ref else "node_attribute_mismatch",
+                    "expected_node": identity(node), "candidate_node": identity(candidate), "field": field,
+                    "expected": safe_value(expected), "actual": safe_value(actual)}
+
+    # Attribute-compatible nodes but incompatible topology/edge payload.
+    expected_by_id = {str(n.get("id")): n for n in expected_nodes if isinstance(n, dict)}
+    actual_by_id = {str(n.get("id")): n for n in actual_nodes if isinstance(n, dict)}
+    for edge in sorted((e for e in expected_edges if isinstance(e, dict)), key=lambda e: str(e.get("id") or "")):
+        source, target = expected_by_id.get(str(edge.get("source"))), expected_by_id.get(str(edge.get("target")))
+        source_identity, target_identity = identity(source or {}), identity(target or {})
+        candidates = [item for item in actual_edges if isinstance(item, dict)
+                      and identity(actual_by_id.get(str(item.get("source")), {})) == source_identity
+                      and identity(actual_by_id.get(str(item.get("target")), {})) == target_identity]
+        if candidates:
+            found = first_difference({k: v for k, v in edge.items() if k not in {"id", "source", "target"}},
+                                     {k: v for k, v in candidates[0].items() if k not in {"id", "source", "target"}})
+            if found:
+                field, expected, actual = found
+                return {"path": f"edges.{field}", "kind": "edge_relation_mismatch", "source_type": source_identity["type"],
+                        "target_type": target_identity["type"], "source_handle": safe_value(edge.get("sourceHandle")),
+                        "target_handle": safe_value(edge.get("targetHandle")), "field": field,
+                        "expected": safe_value(expected), "actual": safe_value(actual)}
+        else:
+            return {"path": "edges.relation", "kind": "edge_relation_mismatch", "source_type": source_identity["type"],
+                    "target_type": target_identity["type"], "source_handle": safe_value(edge.get("sourceHandle")),
+                    "target_handle": safe_value(edge.get("targetHandle")), "field": "source|target"}
+    return {"path": "graph", "kind": "unmatched_node_class", "node_type": "unknown", "expected_count": len(expected_nodes), "actual_count": len(actual_nodes)}
 
 
 class OfficialMarketplaceTemplateService:
@@ -430,10 +563,14 @@ class OfficialMarketplaceTemplateService:
             # Installation, flow, initial version, provenance resource and audit
             # record form one unit. Never retain a partially installed template.
             self.db.rollback()
+            diff_kind, diff_path, expected_type, actual_type, template_node_key = _install_structural_log_fields(exc)
             logger.exception(
                 "event=official_marketplace_install_failed template_slug=%s "
-                "template_version_id=%s tenant_id=%s stage=%s error_code=%s",
+                "template_version_id=%s tenant_id=%s stage=%s error_code=%s "
+                "structural_diff_kind=%s structural_diff_path=%s expected_node_type=%s "
+                "actual_node_type=%s template_node_key=%s",
                 slug, version.id, self.tenant.id, stage, _install_error_code(exc),
+                diff_kind, diff_path, expected_type, actual_type, template_node_key,
             )
             raise
 
