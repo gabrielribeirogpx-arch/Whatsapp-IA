@@ -2,7 +2,7 @@ import pytest
 
 from app.flow_v2.publisher import FlowV2Publisher
 from app.flow_v2.node_handle_contract import migrate_edge_handles
-from app.services.official_marketplace_template_service import publication_boundary_edges, remap_graph, sanitize_snapshot, structural_diff
+from app.services.official_marketplace_template_service import publication_boundary_edges, publication_boundary_start_node_id, remap_graph, sanitize_snapshot, structural_diff
 
 
 def graph():
@@ -140,6 +140,40 @@ def test_representative_49_50_remap_publish_pipeline_accepts_only_runtime_false_
     assert mcp["data"]["allow_external_write"] is False
     assert mcp["data"]["destructive_confirmed"] is False
     assert mapping["node-0"] == published["start_node_id"]
+
+
+def test_publication_boundary_resolves_missing_start_after_remap_without_relaxing_diff():
+    nodes, edges = representative_49_node_graph()
+    remapped_nodes, remapped_edges, mapping = remap_graph(nodes, edges)
+    published = FlowV2Publisher().publish(
+        nodes=remapped_nodes, edges=remapped_edges
+    ).snapshot
+    expected_start = publication_boundary_start_node_id(
+        remapped_nodes, remapped_edges
+    )
+
+    assert expected_start == mapping["node-0"] == published["start_node_id"]
+    assert structural_diff(
+        remapped_nodes, publication_boundary_edges(remapped_nodes, remapped_edges),
+        published["nodes"], published["edges"], expected_start,
+        published["start_node_id"],
+    )["equivalent"]
+
+
+def test_publication_boundary_keeps_distinct_start_nodes_divergent():
+    nodes, edges = representative_49_node_graph()
+
+    report = structural_diff(nodes, edges, nodes, edges, "node-0", "node-1")
+
+    assert not report["equivalent"]
+
+
+def test_publication_boundary_keeps_valid_start_and_arbitrary_node_divergent():
+    nodes, edges = representative_49_node_graph()
+
+    report = structural_diff(nodes, edges, nodes, edges, "node-0", "node-48")
+
+    assert not report["equivalent"]
 
 
 def test_representative_install_pipeline_canonicalizes_only_proven_mcp_alias():

@@ -63,6 +63,18 @@ def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -
     return canonical_hash(snapshot)
 
 
+def resolve_runtime_v2_start_node_id(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+) -> str:
+    """Resolve the start node exactly as the Runtime V2 publication boundary does."""
+
+    nodes_payload = _runtime_v2_nodes_payload(copy.deepcopy(nodes))
+    nodes_payload = _promote_single_root_ai_system_start(
+        nodes_payload, copy.deepcopy(edges)
+    )
+    return _derive_start_node_id(nodes_payload)
+
+
 def _runtime_v2_nodes_payload(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return nodes in the immutable Runtime V2 publication contract.
 
