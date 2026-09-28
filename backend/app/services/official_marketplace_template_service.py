@@ -224,9 +224,12 @@ class OfficialMarketplaceTemplateService:
         self.db.add(version); self.db.commit(); self.db.refresh(version)
         return version
 
-    def install(self, slug: str):
+    def install(self, slug: str, version_id=None):
         self._access()
-        version = self.db.scalar(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(MarketplaceTemplate.slug == slug, MarketplaceTemplateVersion.status == "published").order_by(MarketplaceTemplateVersion.created_at.desc()))
+        filters = [MarketplaceTemplate.slug == slug, MarketplaceTemplateVersion.status == "published"]
+        if version_id is not None:
+            filters.append(MarketplaceTemplateVersion.id == version_id)
+        version = self.db.scalar(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(*filters).order_by(MarketplaceTemplateVersion.created_at.desc()))
         if not version: raise LookupError("published_template_not_found")
         try:
             nodes, edges, mapping = remap_graph(version.nodes_snapshot, version.edges_snapshot)

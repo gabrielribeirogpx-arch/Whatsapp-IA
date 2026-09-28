@@ -49,8 +49,10 @@ import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import PublishMarketplaceTemplateModal from '@/components/flows/PublishMarketplaceTemplateModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
 import { MARKETPLACE_CATALOG } from '@/components/ai-store/catalog';
+import { mergeMarketplaceCatalog } from '@/components/ai-store/dynamicCatalog';
 import AISystemModal from '@/components/flow/AISystemModal';
-import { apiFetch, exportFlow, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
+import { apiFetch, exportFlow, getFlowAnalytics, getFlowGraph, getMarketplaceCatalog, getTenantSessionFromStorage, installOfficialMarketplaceTemplate, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
+import type { MarketplaceCatalogItem } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
@@ -148,8 +150,6 @@ const slugifyToolId = (value: string) =>
 const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow?.id ? `Fluxo ${flow.id.slice(0, 8)}` : 'Fluxo não selecionado');
 const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
 const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
-
-const AI_SYSTEM_CARDS = MARKETPLACE_CATALOG;
 
 const normalizeFlowHandleId = (value: unknown) => String(value ?? '').trim().toLowerCase();
 
@@ -1737,6 +1737,23 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   const [isAgentSystemModalOpen, setIsAgentSystemModalOpen] = useState(false);
+  const [dynamicCatalog, setDynamicCatalog] = useState<MarketplaceCatalogItem[]>([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState(false);
+  const [catalogLoadFailed, setCatalogLoadFailed] = useState(false);
+  const marketplaceCards = useMemo(() => mergeMarketplaceCatalog(MARKETPLACE_CATALOG, dynamicCatalog), [dynamicCatalog]);
+  const refreshMarketplaceCatalog = useCallback(async () => {
+    setIsCatalogLoading(true);
+    setCatalogLoadFailed(false);
+    try {
+      setDynamicCatalog(await getMarketplaceCatalog());
+    } catch (error) {
+      console.error('MARKETPLACE_CATALOG_LOAD_FAILED', error);
+      setCatalogLoadFailed(true);
+    } finally {
+      setIsCatalogLoading(false);
+    }
+  }, []);
+  useEffect(() => { if (isAgentSystemModalOpen) void refreshMarketplaceCatalog(); }, [isAgentSystemModalOpen, refreshMarketplaceCatalog]);
   const [activeAiSystemNodeId, setActiveAiSystemNodeId] = useState<string | null>(null);
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
@@ -3111,12 +3128,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
 
   const handleInsertAgentSystemTemplate = useCallback(async (templateId: string, selectedVariant?: string) => {
-    const marketplaceCard = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
+    const marketplaceCard = marketplaceCards.find((item) => item.id === templateId);
     if (!marketplaceCard || marketplaceCard.availability !== 'installable_real') {
       toast.error('Template ainda não disponível para instalação');
       return;
     }
     try {
+      if (marketplaceCard.catalogSource === 'official') {
+        if (!marketplaceCard.slug || !marketplaceCard.templateVersionId) throw new Error('official_template_identity_missing');
+        const installed = await installOfficialMarketplaceTemplate(marketplaceCard.slug, marketplaceCard.templateVersionId);
+        setIsAgentSystemModalOpen(false);
+        router.push(installed.post_install_route);
+        toast.success(`${marketplaceCard.title} instalado com sucesso`);
+        return;
+      }
       const variant = selectedVariant || (marketplaceCard.marketplaceType === 'Kit de Negócio' ? 'Sem IA' : marketplaceCard.automationLevel === 'Híbrido' ? 'Híbrida' : marketplaceCard.automationLevel);
       const response = await apiFetch(`/api/marketplace/items/${templateId}/install`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ variant }) });
       const installed = await parseApiResponse<{ id?: string; created_resources?: { flows?: string[]; post_install_route?: string } }>(response);
@@ -3145,7 +3170,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     /* Compatibility reference: the legacy callback below remains unreachable so
        old AI System editing/runtime support is not removed from existing flows. */
     const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId) || AGENT_SYSTEM_TEMPLATES[0];
-    const card = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
+    const card = marketplaceCards.find((item) => item.id === templateId);
     const origin = rfInstance?.screenToFlowPosition({ x: 360, y: 180 }) || { x: 120, y: 120 };
     const graph = template && template.nodes.length > 0 ? instantiateAgentSystemTemplate(template, makeNodeId, { x: 0, y: 0 }) : { nodes: [], edges: [] };
     const systemId = makeNodeId();
@@ -3189,7 +3214,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     toast.success(`Sistema IA inserido: ${systemName}`);
     console.info('AI_SYSTEM_CREATED', { system_id: systemId, system_type: templateId, internal_nodes: graph.nodes.length, internal_edges: graph.edges.length });
     setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 500 }), 0);
-  }, [loadFlow, rfInstance, router, setNodes, toast, toggleStartNode, updateNodeData]);
+  }, [loadFlow, marketplaceCards, rfInstance, router, setNodes, toast, toggleStartNode, updateNodeData]);
 
   const getCurrentSerializedFlow = useCallback(() => {
     const realFlow = rfInstance?.toObject?.();
@@ -4391,10 +4416,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       {isAgentSystemModalOpen && (
         <AIStoreModal
-          cards={AI_SYSTEM_CARDS}
+          cards={marketplaceCards}
           templates={AGENT_SYSTEM_TEMPLATES}
           onClose={() => setIsAgentSystemModalOpen(false)}
           onInstall={handleInsertAgentSystemTemplate}
+          isLoadingAdditional={isCatalogLoading}
+          additionalLoadFailed={catalogLoadFailed}
         />
       )}
 
@@ -4733,7 +4760,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           flowName={selectedFlow?.name || 'Novo template'}
           nodes={nodes.map((node) => ({ id: node.id, type: node.type, data: node.data as Record<string, unknown> }))}
           onClose={() => setIsPublishTemplateOpen(false)}
-          onPublished={toast.success}
+          onPublished={(message) => { toast.success(message); void refreshMarketplaceCatalog(); }}
         />
       )}
       {activeAiSystemNode && (
