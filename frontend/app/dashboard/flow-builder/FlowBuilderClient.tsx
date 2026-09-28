@@ -4189,7 +4189,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                     className="flow-top-btn flow-top-btn-neutral"
                     onClick={() => setIsPublishTemplateOpen(true)}
                     disabled={!selectedFlowId}
-                    title="Publicar o fluxo ativo como template instalável"
+                    title="Publicar a versão salva como template instalável"
                   >
                     Publicar como Template
                   </button>

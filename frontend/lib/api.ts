@@ -268,7 +268,7 @@ export type MarketplaceTemplatePublishPayload = {
   template_kind: 'flow' | 'appointment_assistant';
   assistant_mapping?: {
     clinic_name_node_id: string;
-    clinic_name_field: 'data.message' | 'data.content' | 'data.text';
+    clinic_name_field: 'data.content';
     services_node_id: string;
     calendar_node_ids: string[];
     handoff_node_ids: string[];
@@ -343,7 +343,7 @@ export async function installOfficialMarketplaceTemplate(slug: string, versionId
   return parseApiResponse<OfficialTemplateInstallation>(response);
 }
 
-/** Publishes the currently published snapshot of an existing Flow to the Marketplace. */
+/** Publishes the current saved FlowVersion snapshot to the Marketplace. */
 export async function publishFlowAsMarketplaceTemplate(
   flowId: string,
   payload: MarketplaceTemplatePublishPayload,
