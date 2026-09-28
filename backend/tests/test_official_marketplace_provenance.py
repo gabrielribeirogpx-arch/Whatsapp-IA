@@ -73,7 +73,8 @@ def _service(db, role="owner", tenant_id=None):
 def _promoted_assistant_version():
     template, version = _published_template()
     template.slug = "clinicas-agenda-automatica"
-    ids = {name: str(uuid.uuid4()) for name in ("clinic", "availability", "services", "create", "handoff", "end")}
+    ids = {name: str(uuid.uuid4()) for name in ("clinic", "availability", "services", "create", "handoff", "end", "cancel_a", "cancel_b")}
+    cancel_message = "Sem problema. Interrompi o agendamento por enquanto. Quando quiser continuar, é só me chamar."
     draft_nodes = [
         {"id": ids["clinic"], "type": "message", "data": {"content": "Clínica", "isStart": True, "template_node_key": "assistant.clinic_name"}},
         {"id": ids["availability"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_check_availability", "template_node_key": "assistant.calendar.1"}},
@@ -81,6 +82,8 @@ def _promoted_assistant_version():
         {"id": ids["create"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_create_event", "template_node_key": "assistant.calendar.2"}},
         {"id": ids["handoff"], "type": "action", "data": {"action_type": "transfer_human", "reason": "Atendimento humano", "template_node_key": "assistant.handoff.1"}},
         {"id": ids["end"], "type": "message", "data": {"content": "Até logo"}},
+        {"id": ids["cancel_a"], "type": "message", "position": {"x": -2040, "y": -1580}, "data": {"content": cancel_message}},
+        {"id": ids["cancel_b"], "type": "message", "position": {"x": -3740, "y": -1080}, "data": {"content": cancel_message}},
     ]
     draft_edges = [
         {"id": str(uuid.uuid4()), "source": ids["clinic"], "target": ids["availability"]},
@@ -88,6 +91,8 @@ def _promoted_assistant_version():
         {"id": str(uuid.uuid4()), "source": ids["services"], "sourceHandle": "consulta", "target": ids["create"]},
         {"id": str(uuid.uuid4()), "source": ids["create"], "sourceHandle": "success", "target": ids["handoff"]},
         {"id": str(uuid.uuid4()), "source": ids["handoff"], "target": ids["end"]},
+        {"id": str(uuid.uuid4()), "source": ids["availability"], "sourceHandle": "error", "target": ids["cancel_a"]},
+        {"id": str(uuid.uuid4()), "source": ids["create"], "sourceHandle": "error", "target": ids["cancel_b"]},
     ]
     promoted = FlowV2Publisher().publish(nodes=draft_nodes, edges=draft_edges).snapshot
     version.nodes_snapshot = promoted["nodes"]
