@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -45,6 +46,18 @@ GOOGLE_CALENDAR_TOOLS = {
     "calendar.create_appointment", "calendar.get_appointment",
     "calendar.reschedule_appointment", "calendar.cancel_appointment",
 }
+
+logger = logging.getLogger(__name__)
+
+
+def _install_error_code(exc: Exception) -> str:
+    if isinstance(exc, ValueError) and exc.args and isinstance(exc.args[0], dict):
+        code = exc.args[0].get("code")
+        if isinstance(code, str) and code:
+            return code
+    if exc.args and isinstance(exc.args[0], str) and exc.args[0]:
+        return exc.args[0][:80]
+    return type(exc).__name__
 
 
 def sanitize_snapshot(value: Any, key: str | None = None) -> Any:
@@ -231,8 +244,10 @@ class OfficialMarketplaceTemplateService:
             filters.append(MarketplaceTemplateVersion.id == version_id)
         version = self.db.scalar(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(*filters).order_by(MarketplaceTemplateVersion.created_at.desc()))
         if not version: raise LookupError("published_template_not_found")
+        stage = "clone_graph"
         try:
             nodes, edges, mapping = remap_graph(version.nodes_snapshot, version.edges_snapshot)
+            stage = "create_installation"
             installation = MarketplaceInstallation(
                 tenant_id=self.tenant.id,
                 # These two legacy columns intentionally retain their textual
@@ -252,11 +267,15 @@ class OfficialMarketplaceTemplateService:
                 created_resources={},
             )
             self.db.add(installation); self.db.flush()
+            stage = "create_flow"
             flow = Flow(tenant_id=self.tenant.id, name=version.template.name, description=version.template.description, runtime=version.manifest.get("runtime", "v2"), status="draft", nodes=nodes, edges=edges, nodes_json=nodes, edges_json=edges)
             self.db.add(flow); self.db.flush()
+            stage = "publish_initial_flow_version"
             result = FlowV2PublishService().publish_draft(self.db, tenant_id=self.tenant.id, flow_id=flow.id)
+            stage = "validate_installed_snapshot"
             report = structural_diff(version.nodes_snapshot, version.edges_snapshot, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
             if not report["equivalent"]: raise ValueError({"code": "installed_snapshot_diverged", "report": report})
+            stage = "create_provenance"
             resource = MarketplaceInstallationResource(
                 installation_id=installation.id,
                 resource_type="flow",
@@ -271,6 +290,7 @@ class OfficialMarketplaceTemplateService:
                 },
             )
             self.db.add(resource)
+            stage = "establish_managed_baseline"
             establish_official_baseline(
                 self.db, installation=installation, flow=flow,
                 flow_version=result.version, checksum=result.version.graph_checksum,
@@ -295,12 +315,18 @@ class OfficialMarketplaceTemplateService:
                     "flow_version_id": str(result.version.id),
                 },
             ))
+            stage = "commit"
             self.db.commit()
             return {"installation_id": str(installation.id), "flow_id": str(flow.id), "flow_version_id": str(result.version.id), "template_version_id": str(version.id), "id_mapping": mapping, "validation": report, "post_install_route": post_install_route}
-        except Exception:
+        except Exception as exc:
             # Installation, flow, initial version, provenance resource and audit
             # record form one unit. Never retain a partially installed template.
             self.db.rollback()
+            logger.exception(
+                "event=official_marketplace_install_failed template_slug=%s "
+                "template_version_id=%s tenant_id=%s stage=%s error_code=%s",
+                slug, version.id, self.tenant.id, stage, _install_error_code(exc),
+            )
             raise
 
     def get_provenance(self, installation_id) -> dict:
