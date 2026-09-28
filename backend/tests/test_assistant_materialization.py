@@ -59,6 +59,43 @@ def test_materialization_changes_only_declared_fields_and_ignores_duration():
     assert changed == ["clinic_name", "google_calendar_connection_id", "handoff.reason", "services"]
 
 
+def test_clinic_name_interpolation_preserves_surrounding_message_and_is_idempotent():
+    nodes, edges = graph()
+    nodes[0]["data"]["message"] = "Olá! Bem-vindo à {{clinic_name}}. Como posso ajudar?"
+    targets = [{**TARGETS[0], "operation": "interpolate"}]
+
+    candidate, candidate_edges, changed = build_candidate_graph(nodes, edges, configuration(), targets)
+
+    assert candidate[0]["data"]["message"] == "Olá! Bem-vindo à Clínica Segura. Como posso ajudar?"
+    assert candidate_edges == edges
+    assert changed == ["clinic_name"]
+    repeated, _, repeated_changed = build_candidate_graph(
+        candidate, candidate_edges, configuration(), targets, source_nodes=nodes,
+    )
+    assert repeated == candidate
+    assert repeated_changed == []
+
+
+@pytest.mark.parametrize("message", ["Bem-vindo à clínica", "Bem-vindo à {{company_name}}"])
+def test_clinic_name_interpolation_rejects_missing_or_wrong_placeholder(message):
+    nodes, edges = graph()
+    nodes[0]["data"]["message"] = message
+    with pytest.raises(HTTPException, match="materialization_placeholder_missing"):
+        build_candidate_graph(nodes, edges, configuration(), [{**TARGETS[0], "operation": "interpolate"}])
+
+
+def test_interpolation_uses_trusted_source_snapshot_for_configuration_updates():
+    source_nodes, edges = graph()
+    source_nodes[0]["data"]["message"] = "Bem-vindo à {{clinic_name}}"
+    installed = deepcopy(source_nodes)
+    installed[0]["data"]["message"] = "Bem-vindo à Clínica Antiga"
+    candidate, _, _ = build_candidate_graph(
+        installed, edges, configuration(), [{**TARGETS[0], "operation": "interpolate"}],
+        source_nodes=source_nodes,
+    )
+    assert candidate[0]["data"]["message"] == "Bem-vindo à Clínica Segura"
+
+
 def test_materialization_binds_every_declared_calendar_target_only():
     nodes, edges = graph()
     nodes[2]["data"]["template_node_key"] = "availability"
@@ -94,6 +131,12 @@ def test_template_contract_rejects_unknown_fields_duplicates_and_missing_capabil
         })
 
     assert _contract(version(TARGETS)) == TARGETS
+    interpolated = [{**TARGETS[0], "operation": "interpolate"}]
+    assert _contract(version(interpolated)) == interpolated
+    with pytest.raises(HTTPException, match="materialization_operation_not_allowed"):
+        _contract(version([{**TARGETS[1], "operation": "interpolate"}]))
+    with pytest.raises(HTTPException, match="materialization_operation_not_allowed"):
+        _contract(version([{**TARGETS[0], "operation": "evaluate"}]))
     forbidden = [{"parameter": "services", "node_key": "service_choice", "field": "data.tool_name"}]
     with pytest.raises(HTTPException, match="materialization_target_not_allowed"):
         _contract(version(forbidden))

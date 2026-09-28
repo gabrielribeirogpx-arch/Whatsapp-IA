@@ -97,6 +97,9 @@ def _assistant_contract(nodes: list[dict], mapping) -> tuple[list[dict], dict]:
     clinic_field = mapping.clinic_name_field.split(".", 1)[1]
     if not isinstance(clinic.get("data"), dict) or clinic_field not in clinic["data"]:
         raise ValueError("assistant_clinic_name_target_invalid")
+    clinic_message = clinic["data"][clinic_field]
+    if not isinstance(clinic_message, str) or "{{clinic_name}}" not in clinic_message:
+        raise ValueError("assistant_clinic_name_placeholder_missing")
 
     services = by_id[str(mapping.services_node_id)]
     services_data = services.get("data") if isinstance(services.get("data"), dict) else {}
@@ -131,7 +134,10 @@ def _assistant_contract(nodes: list[dict], mapping) -> tuple[list[dict], dict]:
         node.setdefault("data", {})["template_node_key"] = key
         if parameter == "google_calendar_connection_id":
             node["data"]["connection_id"] = "{{integration.connection}}"
-        targets.append({"parameter": parameter, "node_key": key, "field": field})
+        target = {"parameter": parameter, "node_key": key, "field": field}
+        if parameter == "clinic_name":
+            target["operation"] = "interpolate"
+        targets.append(target)
     final_keys = [
         node.get("data", {}).get("template_node_key") for node in nodes
         if isinstance(node, dict) and isinstance(node.get("data"), dict)
