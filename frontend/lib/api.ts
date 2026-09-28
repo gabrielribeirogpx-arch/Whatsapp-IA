@@ -240,6 +240,14 @@ export type MarketplaceTemplatePublishPayload = {
   modality: string;
   tags: string[];
   version: string;
+  template_kind: 'flow' | 'appointment_assistant';
+  assistant_mapping?: {
+    clinic_name_node_id: string;
+    clinic_name_field: 'data.message' | 'data.content' | 'data.text';
+    services_node_id: string;
+    calendar_node_ids: string[];
+    handoff_node_ids: string[];
+  };
 };
 
 export type MarketplaceTemplateVersion = {

@@ -117,6 +117,31 @@ def test_official_install_persists_complete_tenant_scoped_provenance(monkeypatch
         "generated_flow_version_id": result["flow_version_id"],
     }
     assert db.commits == 1
+    assert result["post_install_route"] == f"/dashboard/flow-builder?flow_id={flow.id}"
+    assert installation.created_resources["post_install_route"] == result["post_install_route"]
+
+
+def test_assistant_install_route_is_derived_from_installed_version_capability(monkeypatch):
+    template, version = _published_template()
+    version.manifest["capabilities"] = ["appointment_assistant_configuration"]
+    db = FakeDB(version)
+    service = _service(db)
+
+    def publish(_self, session, *, tenant_id, flow_id):
+        flow = next(item for item in session.added if isinstance(item, Flow))
+        flow_version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id, graph_checksum="a" * 64)
+        flow.current_version_id = flow_version.id
+        return SimpleNamespace(version=flow_version, snapshot={
+            "nodes": flow.nodes_json, "edges": flow.edges_json,
+            "start_node_id": flow.nodes_json[0]["id"],
+        })
+
+    monkeypatch.setattr(module.FlowV2PublishService, "publish_draft", publish)
+    result = service.install(template.slug)
+    installation = next(item for item in db.added if isinstance(item, MarketplaceInstallation))
+    expected = f"/dashboard/assistants/appointments/{installation.id}"
+    assert result["post_install_route"] == expected
+    assert installation.created_resources["post_install_route"] == expected
 
 
 def test_completed_audit_has_only_correlatable_provenance_ids(monkeypatch):

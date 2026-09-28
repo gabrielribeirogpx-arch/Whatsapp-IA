@@ -7,9 +7,19 @@ import { publishFlowAsMarketplaceTemplate } from '@/lib/api';
 type Props = {
   flowId: string;
   flowName: string;
+  nodes: Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
   onClose: () => void;
   onPublished: (message: string) => void;
 };
+
+type TemplateKind = 'flow' | 'appointment_assistant';
+
+function nodeCaption(node: Props['nodes'][number]): string {
+  const data = node.data || {};
+  const label = String(data.label || data.tool_name || data.action_type || node.type || 'Node');
+  const detail = String(data.content || data.message || data.text || data.reason || '').trim();
+  return `${node.type || 'node'} — ${label}${detail ? ` — ${detail.slice(0, 70)}` : ''}`;
+}
 
 const CATEGORIES = ['Atendimento', 'Vendas', 'Marketing', 'Suporte', 'Operações', 'Agendamentos'];
 const MODALITIES = ['Sem IA', 'Híbrido', 'IA Completa', 'Sistema Completo'];
@@ -24,7 +34,7 @@ function readableError(error: unknown): string {
   return message.replace(/^HTTP \d+:\s*/, '') || 'Não foi possível publicar o template.';
 }
 
-export default function PublishMarketplaceTemplateModal({ flowId, flowName, onClose, onPublished }: Props) {
+export default function PublishMarketplaceTemplateModal({ flowId, flowName, nodes, onClose, onPublished }: Props) {
   const [name, setName] = useState(flowName);
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0]);
@@ -34,10 +44,22 @@ export default function PublishMarketplaceTemplateModal({ flowId, flowName, onCl
   const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [templateKind, setTemplateKind] = useState<TemplateKind>('flow');
+  const [clinicNodeId, setClinicNodeId] = useState('');
+  const [clinicField, setClinicField] = useState<'data.message' | 'data.content' | 'data.text'>('data.content');
+  const [servicesNodeId, setServicesNodeId] = useState('');
+  const [calendarNodeIds, setCalendarNodeIds] = useState<string[]>([]);
+  const [handoffNodeIds, setHandoffNodeIds] = useState<string[]>([]);
+
+  const messageNodes = nodes.filter((node) => node.type === 'message');
+  const choiceNodes = nodes.filter((node) => node.type === 'choice');
+  const calendarNodes = nodes.filter((node) => node.type === 'mcp_tool');
+  const handoffNodes = nodes.filter((node) => node.type === 'action');
+  const assistantComplete = Boolean(clinicNodeId && servicesNodeId && calendarNodeIds.length && handoffNodeIds.length);
 
   const canPublish = useMemo(
-    () => name.trim().length > 0 && description.trim().length > 0 && category.length > 0 && modality.length > 0 && version.trim().length > 0,
-    [category, description, modality, name, version],
+    () => name.trim().length > 0 && description.trim().length > 0 && category.length > 0 && modality.length > 0 && version.trim().length > 0 && (templateKind === 'flow' || assistantComplete),
+    [assistantComplete, category, description, modality, name, templateKind, version],
   );
 
   useEffect(() => {
@@ -59,7 +81,12 @@ export default function PublishMarketplaceTemplateModal({ flowId, flowName, onCl
     setIsPublishing(true);
     try {
       const result = await publishFlowAsMarketplaceTemplate(flowId, {
-        name: name.trim(), description: description.trim(), category, modality, tags, version: version.trim(),
+        name: name.trim(), description: description.trim(), category, modality, tags, version: version.trim(), template_kind: templateKind,
+        ...(templateKind === 'appointment_assistant' ? { assistant_mapping: {
+          clinic_name_node_id: clinicNodeId, clinic_name_field: clinicField,
+          services_node_id: servicesNodeId, calendar_node_ids: calendarNodeIds,
+          handoff_node_ids: handoffNodeIds,
+        } } : {}),
       });
       onPublished(`Template “${result.name}” v${result.version} publicado no Marketplace.`);
       onClose();
@@ -82,6 +109,18 @@ export default function PublishMarketplaceTemplateModal({ flowId, flowName, onCl
         <div className="marketplace-publish-body">
           <label>Nome<input autoFocus maxLength={200} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Qualificação de leads" /></label>
           <label>Descrição<textarea maxLength={1000} required rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Explique o objetivo, o público e o resultado deste fluxo." /></label>
+          <fieldset className="marketplace-template-kind"><legend>Tipo de template</legend>
+            <label><input type="radio" name="template-kind" checked={templateKind === 'flow'} onChange={() => setTemplateKind('flow')} /><span><strong>Template de fluxo</strong><small>Instala o fluxo para edição no Flow Builder.</small></span></label>
+            <label><input type="radio" name="template-kind" checked={templateKind === 'appointment_assistant'} onChange={() => setTemplateKind('appointment_assistant')} /><span><strong>Assistente de Agendamento configurável</strong><small>Abre a configuração comercial de clínica, serviços, agenda e transferência.</small></span></label>
+          </fieldset>
+          {templateKind === 'appointment_assistant' && <section className="marketplace-assistant-map" aria-label="Mapeamento do assistente">
+            <p>Indique explicitamente o papel de cada etapa. A publicação não altera seu fluxo original.</p>
+            <label>Mensagem com nome da clínica<select value={clinicNodeId} onChange={(event) => setClinicNodeId(event.target.value)}><option value="">Selecione uma mensagem</option>{messageNodes.map((node) => <option key={node.id} value={node.id}>{nodeCaption(node)}</option>)}</select></label>
+            <label>Campo da mensagem<select value={clinicField} onChange={(event) => setClinicField(event.target.value as typeof clinicField)}><option value="data.content">Conteúdo</option><option value="data.message">Mensagem</option><option value="data.text">Texto</option></select></label>
+            <label>Escolha dos serviços<select value={servicesNodeId} onChange={(event) => setServicesNodeId(event.target.value)}><option value="">Selecione uma escolha</option>{choiceNodes.map((node) => <option key={node.id} value={node.id}>{nodeCaption(node)}</option>)}</select></label>
+            <div><strong>Etapas do Google Calendar</strong><small>Selecione todas as etapas usadas para disponibilidade, criação, busca ou atualização.</small>{calendarNodes.map((node) => <label key={node.id} className="marketplace-node-check"><input type="checkbox" checked={calendarNodeIds.includes(node.id)} onChange={(event) => setCalendarNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{nodeCaption(node)}</span></label>)}</div>
+            <div><strong>Transferência humana</strong>{handoffNodes.map((node) => <label key={node.id} className="marketplace-node-check"><input type="checkbox" checked={handoffNodeIds.includes(node.id)} onChange={(event) => setHandoffNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{nodeCaption(node)}</span></label>)}</div>
+          </section>}
           <div className="marketplace-publish-grid">
             <label>Categoria<select value={category} onChange={(event) => setCategory(event.target.value)}>{CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label>Modalidade<select value={modality} onChange={(event) => setModality(event.target.value)}>{MODALITIES.map((item) => <option key={item}>{item}</option>)}</select></label>
