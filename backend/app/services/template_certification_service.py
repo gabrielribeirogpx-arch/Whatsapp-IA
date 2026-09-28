@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -19,6 +20,7 @@ from app.services.assistant_configuration_service import CAPABILITY
 from app.services.assistant_materialization_service import _contract
 
 CERTIFICATION_VERSION = "template-certification-v1"
+logger = logging.getLogger(__name__)
 
 
 def candidate_checksum(manifest: dict, nodes: list, edges: list) -> str:
@@ -104,8 +106,25 @@ class TemplateCertificationService:
                                  expected_start, snapshot.get("start_node_id"))
         if not report["equivalent"]:
             difference = (report.get("differences") or [{}])[0]
-            issue = {key: difference[key] for key in ("path", "kind", "node_type", "template_node_key") if key in difference}
+            issue = {key: difference[key] for key in (
+                "path", "kind", "node_type", "template_node_key", "field", "edge_fingerprint",
+                "source_type", "source_template_node_key", "target_type", "target_template_node_key",
+                "expected", "actual",
+            ) if key in difference and difference[key] is not None}
             issue["code"] = "template_snapshot_diverged"
+            if difference.get("kind") == "edge_relation_mismatch":
+                log_payload = {
+                    "event": "template_certification_structural_mismatch",
+                    "certification_version": CERTIFICATION_VERSION,
+                    "candidate_checksum": checksum,
+                    "stage": "structural_equivalence",
+                    **{key: difference[key] for key in (
+                        "kind", "path", "edge_fingerprint", "source_type", "source_template_node_key",
+                        "target_type", "target_template_node_key", "expected_checkpoint", "actual_checkpoint",
+                    ) if key in difference and difference[key] is not None},
+                }
+                logger.warning("template_certification_structural_mismatch %s",
+                               json.dumps(log_payload, sort_keys=True, separators=(",", ":")))
             return TemplateCertificationResult(False, CERTIFICATION_VERSION, checksum, runtime_hash,
                                                "structural_equivalence", (issue,), summary)
         return TemplateCertificationResult(True, CERTIFICATION_VERSION, checksum, runtime_hash, "pass", (), summary,

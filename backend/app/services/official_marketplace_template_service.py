@@ -52,6 +52,13 @@ GOOGLE_CALENDAR_TOOLS = {
 
 logger = logging.getLogger(__name__)
 
+# These are routing-contract values, not business data. Only values in this
+# closed set may be emitted verbatim by structural diagnostics.
+SAFE_STRUCTURAL_VALUES = frozenset({
+    "success", "error", "timeout", "selected", "empty", "cancel", "invalid",
+    "true", "false", "default", "sucesso", "erro", "tempo_esgotado",
+})
+
 
 def _install_error_code(exc: Exception) -> str:
     if isinstance(exc, ValueError) and exc.args and isinstance(exc.args[0], dict):
@@ -351,15 +358,33 @@ def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes
             result["template_node_key"] = key
         return result
 
-    def safe_value(value):
-        result = {"type": type(value).__name__}
+    def safe_value(value, *, structural=False):
+        if structural and isinstance(value, str) and value in SAFE_STRUCTURAL_VALUES:
+            return {"safe_value": value}
+        result = {"value_type": type(value).__name__}
         if isinstance(value, str):
-            result.update(length=len(value), sha256=hashlib.sha256(value.encode()).hexdigest()[:12])
+            result.update(value_length=len(value), short_hash=hashlib.sha256(value.encode()).hexdigest()[:12])
         elif isinstance(value, (list, dict)):
-            result["length"] = len(value)
+            result["value_length"] = len(value)
         elif value is None or isinstance(value, (bool, int, float)):
-            result["value"] = value
+            # Type is sufficient here: diagnostics must never accidentally
+            # broaden their payload beyond the closed routing string set.
+            pass
         return result
+
+    def edge_fingerprint(source_identity, target_identity, field):
+        material = json.dumps({"source": source_identity, "target": target_identity, "relation": field},
+                              sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(material.encode()).hexdigest()[:20]
+
+    def structural_checkpoint(edge):
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        return {
+            "sourceHandle": safe_value(edge.get("sourceHandle"), structural=True),
+            "data.sourceHandle": safe_value(data.get("sourceHandle"), structural=True),
+            "condition": safe_value(edge.get("condition"), structural=True),
+            "data.condition": safe_value(data.get("condition"), structural=True),
+        }
 
     def first_difference(left, right, path=""):
         if isinstance(left, dict) and isinstance(right, dict):
@@ -426,14 +451,24 @@ def _diagnose_structural_divergence(expected_nodes, expected_edges, actual_nodes
                                      {k: v for k, v in candidates[0].items() if k not in {"id", "source", "target"}})
             if found:
                 field, expected, actual = found
-                return {"path": f"edges.{field}", "kind": "edge_relation_mismatch", "source_type": source_identity["type"],
-                        "target_type": target_identity["type"], "source_handle": safe_value(edge.get("sourceHandle")),
-                        "target_handle": safe_value(edge.get("targetHandle")), "field": field,
-                        "expected": safe_value(expected), "actual": safe_value(actual)}
+                structural = field in {"sourceHandle", "data.sourceHandle", "condition", "data.condition"}
+                return {"path": f"edges.{field}", "kind": "edge_relation_mismatch",
+                        "edge_fingerprint": edge_fingerprint(source_identity, target_identity, field),
+                        "source_type": source_identity["type"],
+                        "source_template_node_key": source_identity.get("template_node_key"),
+                        "target_type": target_identity["type"],
+                        "target_template_node_key": target_identity.get("template_node_key"),
+                        "field": field, "expected": safe_value(expected, structural=structural),
+                        "actual": safe_value(actual, structural=structural),
+                        "expected_checkpoint": structural_checkpoint(edge),
+                        "actual_checkpoint": structural_checkpoint(candidates[0])}
         else:
             return {"path": "edges.relation", "kind": "edge_relation_mismatch", "source_type": source_identity["type"],
-                    "target_type": target_identity["type"], "source_handle": safe_value(edge.get("sourceHandle")),
-                    "target_handle": safe_value(edge.get("targetHandle")), "field": "source|target"}
+                    "source_template_node_key": source_identity.get("template_node_key"),
+                    "target_type": target_identity["type"],
+                    "target_template_node_key": target_identity.get("template_node_key"),
+                    "edge_fingerprint": edge_fingerprint(source_identity, target_identity, "source|target"),
+                    "field": "source|target", "expected_checkpoint": structural_checkpoint(edge)}
     return {"path": "graph", "kind": "unmatched_node_class", "node_type": "unknown", "expected_count": len(expected_nodes), "actual_count": len(actual_nodes)}
 
 
