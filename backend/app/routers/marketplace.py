@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,11 @@ from app.services.assistant_configurator_service import AssistantConfiguratorSer
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
 class InstallBody(BaseModel):
     variant: str = "Sem IA"
+
+class OfficialInstallBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: UUID
 class ComposerDraft(BaseModel):
     key: str
     template_type: str
@@ -88,9 +94,50 @@ def preview(slug: str, variant: str = Query("Sem IA"), svc=Depends(service)):
     except Exception as exc: translate(exc)
 @router.get("/catalog")
 def catalog(db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
-    legacy = [{**item, "name": ASSETS[item["flow_assets"][0]]["name"] if item["flow_assets"] else item["key"]} for item in ITEMS.values()]
-    official = db.scalars(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(MarketplaceTemplateVersion.status == "published").order_by(MarketplaceTemplateVersion.published_at.desc())).all()
-    return legacy + [{"key": v.template.key, "slug": v.template.slug, "name": v.template.name, "description": v.template.description, "category": v.template.category, "segment": v.template.segment, "modality": v.template.modality, "version": v.version, "official": True} for v in official]
+    def version_key(value: MarketplaceTemplateVersion):
+        # Versions are authored as strings. Natural token ordering preserves the
+        # existing version semantics (1.10 > 1.2), with publication/creation/id
+        # as deterministic tie-breakers for otherwise equivalent labels.
+        natural = tuple((0, int(part)) if part.isdigit() else (1, part.lower())
+                        for part in re.findall(r"\d+|[^\d]+", value.version))
+        return natural, value.published_at or value.created_at, value.created_at, str(value.id)
+
+    legacy = []
+    for item in ITEMS.values():
+        asset = ASSETS[item["flow_assets"][0]] if item["flow_assets"] else None
+        legacy.append({
+            "source": "legacy", "key": item["key"], "slug": item["key"],
+            "name": asset["name"] if asset else item["key"],
+            "description": asset.get("description") if asset else None,
+            "category": item["template_type"],
+            "segment": asset.get("metadata", {}).get("segment", "Geral") if asset else "Geral",
+            "modality": (item.get("variants") or ["no_ai"])[0], "version": item["version"],
+            "status": "published", "template_type": item["template_type"],
+            "capabilities": [], "commercial": {"availability": item["availability"]},
+        })
+    published = db.scalars(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(
+        MarketplaceTemplateVersion.status == "published"
+    )).all()
+    latest = {}
+    for version in published:
+        current = latest.get(version.template_id)
+        if current is None or version_key(version) > version_key(current):
+            latest[version.template_id] = version
+    official = [{
+        "source": "official", "key": v.template.key, "template_id": str(v.template_id),
+        "version_id": str(v.id), "slug": v.template.slug, "name": v.template.name,
+        "description": v.template.description, "category": v.template.category,
+        "segment": v.template.segment, "modality": v.template.modality,
+        "version": v.version, "status": v.status, "template_type": "official_flow",
+        "capabilities": list(v.manifest.get("capabilities", [])) if isinstance(v.manifest, dict) else [],
+        "commercial": {
+            "estimated_time": v.manifest.get("estimated_time") if isinstance(v.manifest, dict) else None,
+            "level": v.manifest.get("level") if isinstance(v.manifest, dict) else None,
+            "tags": v.manifest.get("tags", []) if isinstance(v.manifest, dict) else [],
+            "availability": "installable_real",
+        },
+    } for v in sorted(latest.values(), key=version_key, reverse=True)]
+    return legacy + official
 
 @router.post("/official-templates/from-flow/{flow_id}")
 def promote_flow(flow_id: UUID, body: PromoteTemplateBody, svc=Depends(official_service)):
@@ -103,8 +150,8 @@ def official_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(g
     return [version_output(v) for v in db.scalars(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).order_by(MarketplaceTemplateVersion.created_at.desc())).all()]
 
 @router.post("/official-templates/{slug}/install")
-def install_official(slug: str, svc=Depends(official_service)):
-    try: return svc.install(slug)
+def install_official(slug: str, body: OfficialInstallBody | None = None, svc=Depends(official_service)):
+    try: return svc.install(slug, body.version_id if body else None)
     except Exception as exc: translate(exc)
 
 @router.post("/official-template-versions/{version_id}/publish")

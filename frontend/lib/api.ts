@@ -259,6 +259,65 @@ export type MarketplaceTemplateVersion = {
   status: string;
 };
 
+export type MarketplaceCatalogItem = {
+  source: 'legacy' | 'official';
+  key: string;
+  template_id?: string;
+  version_id?: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  category: string;
+  segment: string;
+  modality: string;
+  version: string;
+  status: 'published';
+  template_type: 'flow_template' | 'ai_composition' | 'business_kit' | 'official_flow';
+  capabilities: string[];
+  commercial: {
+    availability: 'installable_real' | 'preview_only';
+    estimated_time?: string | null;
+    level?: string | null;
+    tags?: string[];
+  };
+};
+
+export async function getMarketplaceCatalog(): Promise<MarketplaceCatalogItem[]> {
+  const payload = await parseApiResponse<unknown>(await apiFetch('/api/marketplace/catalog'));
+  if (!Array.isArray(payload)) throw new Error('invalid_marketplace_catalog');
+  return payload.filter((value): value is MarketplaceCatalogItem => {
+    if (!value || typeof value !== 'object') return false;
+    const item = value as Record<string, unknown>;
+    const commercial = item.commercial;
+    const hasOfficialIdentity = item.source !== 'official'
+      || (typeof item.template_id === 'string' && typeof item.version_id === 'string');
+    return (item.source === 'legacy' || item.source === 'official') && hasOfficialIdentity
+      && typeof item.key === 'string' && typeof item.slug === 'string'
+      && typeof item.name === 'string' && (typeof item.description === 'string' || item.description === null)
+      && typeof item.category === 'string' && typeof item.segment === 'string'
+      && typeof item.modality === 'string' && typeof item.version === 'string'
+      && item.status === 'published' && Array.isArray(item.capabilities)
+      && item.capabilities.every((entry) => typeof entry === 'string')
+      && !!commercial && typeof commercial === 'object'
+      && ['installable_real', 'preview_only'].includes(String((commercial as Record<string, unknown>).availability));
+  });
+}
+
+export type OfficialTemplateInstallation = {
+  installation_id: string;
+  flow_id: string;
+  flow_version_id: string;
+  template_version_id: string;
+  post_install_route: string;
+};
+
+export async function installOfficialMarketplaceTemplate(slug: string, versionId: string): Promise<OfficialTemplateInstallation> {
+  const response = await apiFetch(`/api/marketplace/official-templates/${encodeURIComponent(slug)}/install`, {
+    method: 'POST', body: JSON.stringify({ version_id: versionId }),
+  });
+  return parseApiResponse<OfficialTemplateInstallation>(response);
+}
+
 /** Publishes the currently published snapshot of an existing Flow to the Marketplace. */
 export async function publishFlowAsMarketplaceTemplate(
   flowId: string,

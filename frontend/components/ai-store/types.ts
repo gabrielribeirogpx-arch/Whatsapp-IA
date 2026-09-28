@@ -41,6 +41,10 @@ export type AIStoreCardData = {
   version: string;
   installManifest: Readonly<Record<string, readonly unknown[]>>;
   businessKit?: BusinessKit;
+  catalogSource?: 'legacy' | 'official';
+  templateId?: string;
+  templateVersionId?: string;
+  slug?: string;
 };
 
 export type AIStoreTemplateMeta = { id: string; name: string; category: string; version: string; description?: string };
