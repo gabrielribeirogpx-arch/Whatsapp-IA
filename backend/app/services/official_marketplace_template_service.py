@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.flow_v2.publish_service import FlowV2PublishService
+from app.flow_v2.publisher import resolve_runtime_v2_start_node_id
 from app.flow_v2.node_handle_contract import migrate_edge_handles
 from app.models import (
     Flow,
@@ -202,6 +203,22 @@ def publication_boundary_edges(nodes: list[dict], edges: list[dict]) -> list[dic
     the expected side and does not change endpoints or equate branch values.
     """
     return migrate_edge_handles(copy.deepcopy(nodes), copy.deepcopy(edges))
+
+
+def publication_boundary_start_node_id(
+    nodes: list[dict], edges: list[dict], declared_start_node_id: str | None = None
+) -> str | None:
+    """Return the candidate start identity in Runtime V2's canonical form.
+
+    An explicit Marketplace identity remains authoritative (and is checked by
+    ``structural_diff``).  Legacy candidates that omit it carry the same
+    information on their start node, so resolve that marker through the exact
+    publisher contract rather than treating absence as a wildcard.
+    """
+    if declared_start_node_id is not None:
+        return str(declared_start_node_id)
+    resolved = resolve_runtime_v2_start_node_id(nodes, edges)
+    return resolved or None
 
 
 def structural_diff(expected_nodes: list[dict], expected_edges: list[dict], actual_nodes: list[dict], actual_edges: list[dict], expected_start: str | None = None, actual_start: str | None = None) -> dict:
@@ -660,7 +677,11 @@ class OfficialMarketplaceTemplateService:
             result = FlowV2PublishService().publish_draft(self.db, tenant_id=self.tenant.id, flow_id=flow.id)
             stage = "validate_installed_snapshot"
             expected_edges = publication_boundary_edges(version.nodes_snapshot, version.edges_snapshot)
-            report = structural_diff(version.nodes_snapshot, expected_edges, result.snapshot["nodes"], result.snapshot["edges"], version.manifest.get("start_node_id"), result.snapshot.get("start_node_id"))
+            expected_start = publication_boundary_start_node_id(
+                version.nodes_snapshot, version.edges_snapshot,
+                version.manifest.get("start_node_id"),
+            )
+            report = structural_diff(version.nodes_snapshot, expected_edges, result.snapshot["nodes"], result.snapshot["edges"], expected_start, result.snapshot.get("start_node_id"))
             if not report["equivalent"]: raise ValueError({"code": "installed_snapshot_diverged", "report": report})
             stage = "create_provenance"
             resource = MarketplaceInstallationResource(

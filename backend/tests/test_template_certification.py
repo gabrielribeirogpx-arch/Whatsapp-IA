@@ -61,6 +61,65 @@ def test_simple_flow_certifies_through_publisher_and_always_rolls_back(monkeypat
     assert db.savepoint.rollbacks == 1
 
 
+def test_candidate_without_start_id_certifies_same_publisher_resolved_start(monkeypatch):
+    db = _Session()
+    manifest, nodes, edges = _candidate()
+    manifest.pop("start_node_id")
+
+    def publish(_self, _db, *, tenant_id, flow_id):
+        result = FlowV2Publisher().publish(
+            nodes=db.temporary.nodes_json, edges=db.temporary.edges_json
+        )
+        return SimpleNamespace(
+            snapshot=result.snapshot,
+            version=SimpleNamespace(v2_snapshot_hash=result.v2_snapshot_hash),
+        )
+
+    monkeypatch.setattr(
+        "app.services.template_certification_service.FlowV2PublishService.publish_draft",
+        publish,
+    )
+
+    result = TemplateCertificationService(db, tenant_id="tenant").certify(
+        manifest=manifest, nodes=nodes, edges=edges
+    )
+
+    assert result.ok
+    assert result.stage == "pass"
+
+
+def test_candidate_without_start_id_rejects_different_publisher_start(monkeypatch):
+    db = _Session()
+    manifest = {"runtime": "v2"}
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True}},
+        {"id": "other", "type": "message", "data": {"isEnd": True}},
+    ]
+    edges = [{"id": "edge", "source": "start", "target": "other"}]
+
+    def publish(_self, _db, *, tenant_id, flow_id):
+        result = FlowV2Publisher().publish(
+            nodes=db.temporary.nodes_json, edges=db.temporary.edges_json
+        )
+        result.snapshot["start_node_id"] = db.temporary.nodes_json[1]["id"]
+        return SimpleNamespace(
+            snapshot=result.snapshot,
+            version=SimpleNamespace(v2_snapshot_hash=result.v2_snapshot_hash),
+        )
+
+    monkeypatch.setattr(
+        "app.services.template_certification_service.FlowV2PublishService.publish_draft",
+        publish,
+    )
+
+    result = TemplateCertificationService(db, tenant_id="tenant").certify(
+        manifest=manifest, nodes=nodes, edges=edges
+    )
+
+    assert not result.ok
+    assert result.stage == "structural_equivalence"
+
+
 def test_invalid_reference_fails_closed_without_sensitive_diagnostics():
     manifest, nodes, _ = _candidate()
     result = TemplateCertificationService(_Session(), tenant_id="tenant").certify(

@@ -55,7 +55,8 @@ class TemplateCertificationService:
         # Import the canonical Marketplace operations lazily to avoid moving or
         # forking their established contracts.
         from app.services.official_marketplace_template_service import (
-            publication_boundary_edges, remap_graph, structural_diff,
+            publication_boundary_edges, publication_boundary_start_node_id,
+            remap_graph, structural_diff,
         )
 
         checksum = candidate_checksum(manifest, nodes, edges)
@@ -75,7 +76,10 @@ class TemplateCertificationService:
 
         try:
             remapped_nodes, remapped_edges, mapping = remap_graph(nodes, edges)
-            expected_start = mapping.get(str(manifest.get("start_node_id")))
+            expected_start = (
+                mapping.get(str(manifest["start_node_id"]))
+                if manifest.get("start_node_id") is not None else None
+            )
         except (KeyError, TypeError, ValueError):
             return self._fail(checksum, "remap", "template_remap_failed", summary)
 
@@ -102,6 +106,9 @@ class TemplateCertificationService:
                 savepoint.rollback()
 
         expected_edges = publication_boundary_edges(remapped_nodes, remapped_edges)
+        expected_start = publication_boundary_start_node_id(
+            remapped_nodes, remapped_edges, expected_start
+        )
         report = structural_diff(remapped_nodes, expected_edges, snapshot["nodes"], snapshot["edges"],
                                  expected_start, snapshot.get("start_node_id"))
         if not report["equivalent"]:
