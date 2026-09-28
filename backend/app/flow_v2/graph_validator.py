@@ -59,13 +59,8 @@ class FlowV2GraphValidator:
         edges_payload = migrate_edge_handles(nodes_payload, edges) if isinstance(edges, list) else []
 
         logger.info(
-            "event=flow_graph_pre_validation node=%s sourceHandle=%s targetHandle=%s edges=%s payload_published=%s payload_received=%s",
-            [node.get("id") for node in nodes_payload if isinstance(node, dict)],
-            [edge.get("sourceHandle") for edge in edges_payload if isinstance(edge, dict)],
-            [edge.get("targetHandle") for edge in edges_payload if isinstance(edge, dict)],
-            edges_payload,
-            {"nodes": nodes_payload, "edges": edges_payload},
-            {"nodes": nodes, "edges": edges},
+            "event=flow_graph_pre_validation node_count=%s edge_count=%s",
+            len(nodes_payload), len(edges_payload),
         )
 
         node_ids = self._validate_nodes(nodes_payload, errors)

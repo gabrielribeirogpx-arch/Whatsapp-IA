@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -138,7 +139,7 @@ def test_common_template_does_not_require_mapping():
     assert body.assistant_mapping is None
 
 
-def test_promotion_uses_current_saved_snapshot_without_publishing_source():
+def test_promotion_uses_current_saved_snapshot_without_publishing_source(monkeypatch):
     nodes, ids, mapping = graph()
     current_id, published_id, flow_id, tenant_id, user_id = (uuid4() for _ in range(5))
     flow = type("FlowSource", (), {
@@ -174,6 +175,27 @@ def test_promotion_uses_current_saved_snapshot_without_publishing_source():
             pass
 
     db = PromotionDB()
+    from app.services.template_certification_service import candidate_checksum
+
+    class PassingCertification:
+        ok = True
+        certification_version = "template-certification-v1"
+        runtime_snapshot_hash = "a" * 64
+        stage = "pass"
+        issues = ()
+        certified_at = datetime.utcnow().isoformat()
+
+        def __init__(self, checksum):
+            self.candidate_checksum = checksum
+
+        def report(self):
+            return {"ok": True, "certification_version": self.certification_version,
+                    "candidate_checksum": self.candidate_checksum, "stage": "pass", "issues": []}
+
+    def certify(_self, *, manifest, nodes, edges):
+        return PassingCertification(candidate_checksum(manifest, nodes, edges))
+
+    monkeypatch.setattr("app.services.template_certification_service.TemplateCertificationService.certify", certify)
     service = OfficialMarketplaceTemplateService(
         db,
         type("Tenant", (), {"id": tenant_id})(),

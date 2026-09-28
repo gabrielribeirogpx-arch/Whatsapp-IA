@@ -485,15 +485,33 @@ class OfficialMarketplaceTemplateService:
             self.db.add(template); self.db.flush()
         if self.db.scalar(select(MarketplaceTemplateVersion).where(MarketplaceTemplateVersion.template_id == template.id, MarketplaceTemplateVersion.version == payload.version)):
             raise ValueError("template_version_already_exists")
-        canonical = json.dumps({"manifest": manifest, "nodes": nodes, "edges": edges}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        report = structural_diff(nodes, edges, nodes, edges)
-        version = MarketplaceTemplateVersion(template_id=template.id, version=payload.version, status=payload.status, source_flow_id=flow.id, source_flow_version_id=source.id, manifest=manifest, nodes_snapshot=nodes, edges_snapshot=edges, dependencies=manifest.get("dependencies", {}), checksum=hashlib.sha256(canonical.encode()).hexdigest(), validation_report=report, created_by=self.user.id, published_at=datetime.utcnow() if payload.status == "published" else None)
+        from app.services.template_certification_service import TemplateCertificationService, candidate_checksum
+        certification = TemplateCertificationService(self.db, tenant_id=self.tenant.id).certify(
+            manifest=manifest, nodes=nodes, edges=edges,
+        )
+        if not certification.ok:
+            self.db.rollback()
+            raise ValueError({"code": "template_certification_failed", "stage": certification.stage,
+                              "issues": list(certification.issues)})
+        checksum = candidate_checksum(manifest, nodes, edges)
+        if checksum != certification.candidate_checksum:
+            self.db.rollback()
+            raise ValueError("template_candidate_checksum_mismatch")
+        # `status=published` is only a request. Certification, not the client,
+        # authorizes the server-owned lifecycle transition.
+        status = "published" if payload.status == "published" else payload.status
+        report = certification.report()
+        version = MarketplaceTemplateVersion(template_id=template.id, version=payload.version, status=status, source_flow_id=flow.id, source_flow_version_id=source.id, manifest=manifest, nodes_snapshot=nodes, edges_snapshot=edges, dependencies=manifest.get("dependencies", {}), checksum=checksum, validation_report=report, certification_status="certified", certification_version=certification.certification_version, candidate_checksum=certification.candidate_checksum, certified_at=datetime.fromisoformat(certification.certified_at), created_by=self.user.id, published_at=datetime.utcnow() if status == "published" else None)
         self.db.add(version); self.db.commit(); self.db.refresh(version)
         return version
 
     def install(self, slug: str, version_id=None):
         self._access()
-        filters = [MarketplaceTemplate.slug == slug, MarketplaceTemplateVersion.status == "published"]
+        filters = [
+            MarketplaceTemplate.slug == slug,
+            MarketplaceTemplateVersion.status == "published",
+            MarketplaceTemplateVersion.certification_status.in_(("certified", "legacy_unverified")),
+        ]
         if version_id is not None:
             filters.append(MarketplaceTemplateVersion.id == version_id)
         version = self.db.scalar(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(*filters).order_by(MarketplaceTemplateVersion.created_at.desc()))
@@ -635,8 +653,14 @@ class OfficialMarketplaceTemplateService:
         self._access()
         version = self.db.get(MarketplaceTemplateVersion, version_id)
         if not version: raise LookupError("template_version_not_found")
-        if publish and not version.validation_report.get("equivalent"):
-            raise ValueError("template_has_functional_divergence")
+        if publish:
+            from app.services.template_certification_service import CERTIFICATION_VERSION, candidate_checksum
+            expected = candidate_checksum(version.manifest, version.nodes_snapshot, version.edges_snapshot)
+            if not (version.certification_status == "certified"
+                    and version.certification_version == CERTIFICATION_VERSION
+                    and version.candidate_checksum == expected
+                    and version.validation_report.get("ok") is True):
+                raise ValueError("template_certification_required")
         # Snapshots and manifests remain immutable; only catalog visibility is a
         # lifecycle property and can be toggled by an administrator.
         version.status = "published" if publish else "draft"

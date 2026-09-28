@@ -78,7 +78,7 @@ def official_service(db: Session = Depends(get_db), tenant: Tenant = Depends(get
     return OfficialMarketplaceTemplateService(db, tenant, user)
 
 def version_output(version: MarketplaceTemplateVersion):
-    return {"id": str(version.id), "template_id": str(version.template_id), "slug": version.template.slug, "name": version.template.name, "version": version.version, "status": version.status, "source_flow_id": str(version.source_flow_id), "source_flow_version_id": str(version.source_flow_version_id), "manifest": version.manifest, "dependencies": version.dependencies, "checksum": version.checksum, "validation": version.validation_report, "created_at": version.created_at, "published_at": version.published_at}
+    return {"id": str(version.id), "template_id": str(version.template_id), "slug": version.template.slug, "name": version.template.name, "version": version.version, "status": version.status, "source_flow_id": str(version.source_flow_id), "source_flow_version_id": str(version.source_flow_version_id), "manifest": version.manifest, "dependencies": version.dependencies, "checksum": version.checksum, "validation": version.validation_report, "certification_status": version.certification_status, "certification_version": version.certification_version, "candidate_checksum": version.candidate_checksum, "certified_at": version.certified_at, "created_at": version.created_at, "published_at": version.published_at}
 def service(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     return MarketplaceInstallationService(db, tenant, user)
 def output(item):
@@ -116,7 +116,8 @@ def catalog(db: Session = Depends(get_db), user: TenantUser = Depends(get_curren
             "capabilities": [], "commercial": {"availability": item["availability"]},
         })
     published = db.scalars(select(MarketplaceTemplateVersion).join(MarketplaceTemplate).where(
-        MarketplaceTemplateVersion.status == "published"
+        MarketplaceTemplateVersion.status == "published",
+        MarketplaceTemplateVersion.certification_status.in_(("certified", "legacy_unverified")),
     )).all()
     latest = {}
     for version in published:
@@ -129,6 +130,7 @@ def catalog(db: Session = Depends(get_db), user: TenantUser = Depends(get_curren
         "description": v.template.description, "category": v.template.category,
         "segment": v.template.segment, "modality": v.template.modality,
         "version": v.version, "status": v.status, "template_type": "official_flow",
+        "certification": getattr(v, "certification_status", "legacy_unverified"),
         "capabilities": list(v.manifest.get("capabilities", [])) if isinstance(v.manifest, dict) else [],
         "commercial": {
             "estimated_time": v.manifest.get("estimated_time") if isinstance(v.manifest, dict) else None,

@@ -461,8 +461,12 @@ def _log_graph_bfs_before_validation(*, nodes: list[dict[str, Any]], edges: list
     unvisited = [node_id for node_id in node_ids if node_id not in seen]
     roots = [node_id for node_id in node_ids if incoming.get(node_id, 0) == 0]
     terminals = [node_id for node_id in node_ids if outgoing.get(node_id, 0) == 0 or any(_node_id(node) == node_id and _node_is_terminal(node) for node in nodes if isinstance(node, dict))]
-    logger.info("FLOW_V2_PRE_VALIDATION_BFS START NODE: %s VISITED: %s UNVISITED: %s", start, visited, unvisited)
-    logger.info("FLOW_V2_PRE_VALIDATION_CONSISTENCY NODES=%s EDGES=%s ROOTS=%s STARTS=%s TERMINALS=%s OUTGOING=%s INCOMING=%s", _compact_json(nodes), _compact_json(edges), roots, start_node_ids, terminals, outgoing, incoming)
+    # Graph bodies can contain message text, credentials and patient data.
+    # Operational diagnostics deliberately retain counts only.
+    logger.info(
+        "FLOW_V2_PRE_VALIDATION_CONSISTENCY NODES=%s EDGES=%s ROOTS=%s STARTS=%s TERMINALS=%s VISITED=%s UNVISITED=%s",
+        len(nodes), len(edges), len(roots), len(start_node_ids), len(terminals), len(visited), len(unvisited),
+    )
 
 def _node_id(node: dict[str, Any]) -> str:
     return str(node.get("id") or "").strip()
