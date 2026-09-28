@@ -193,11 +193,36 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return response;
 }
 
+export class ApiResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly errorCode: string | null,
+    public readonly responseBody: unknown,
+  ) {
+    super(`HTTP ${status}${errorCode ? `: ${errorCode}` : ''}`);
+    this.name = 'ApiResponseError';
+  }
+}
+
 export async function parseApiResponse<T>(res: Response): Promise<T> {
   const body = await res.text();
 
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${body}`);
+    let payload: unknown = body;
+    let errorCode: string | null = null;
+    try {
+      payload = JSON.parse(body) as unknown;
+      if (payload && typeof payload === 'object') {
+        const detail = (payload as Record<string, unknown>).detail;
+        if (typeof detail === 'string') errorCode = detail;
+        else if (detail && typeof detail === 'object' && typeof (detail as Record<string, unknown>).code === 'string') {
+          errorCode = (detail as Record<string, unknown>).code as string;
+        }
+      }
+    } catch {
+      // Keep non-JSON response text for development diagnostics.
+    }
+    throw new ApiResponseError(res.status, errorCode, payload);
   }
 
   if (res.status === 204 || res.status === 205 || body.trim().length === 0) {

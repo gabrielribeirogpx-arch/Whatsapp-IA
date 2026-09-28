@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 import app.services.official_marketplace_template_service as module
+from app.flow_v2.publisher import FlowV2Publisher
 from app.models import (
     Flow,
     MarketplaceInstallation,
@@ -67,6 +68,70 @@ def _service(db, role="owner", tenant_id=None):
     tenant = SimpleNamespace(id=tenant_id)
     user = SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant_id, role=role)
     return module.OfficialMarketplaceTemplateService(db, tenant, user)
+
+
+def _promoted_assistant_version():
+    template, version = _published_template()
+    template.slug = "clinicas-agenda-automatica"
+    ids = {name: str(uuid.uuid4()) for name in ("clinic", "availability", "services", "create", "handoff", "end")}
+    draft_nodes = [
+        {"id": ids["clinic"], "type": "message", "data": {"content": "Clínica", "isStart": True, "template_node_key": "assistant.clinic_name"}},
+        {"id": ids["availability"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_check_availability", "template_node_key": "assistant.calendar.1"}},
+        {"id": ids["services"], "type": "choice", "options": [{"id": "consulta", "label": "Consulta"}], "data": {"options_mode": "fixed", "options": [{"id": "consulta", "label": "Consulta"}], "result_variable": "selected_service", "template_node_key": "assistant.services"}},
+        {"id": ids["create"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_create_event", "template_node_key": "assistant.calendar.2"}},
+        {"id": ids["handoff"], "type": "action", "data": {"action_type": "transfer_human", "reason": "Atendimento humano", "template_node_key": "assistant.handoff.1"}},
+        {"id": ids["end"], "type": "message", "data": {"content": "Até logo"}},
+    ]
+    draft_edges = [
+        {"id": str(uuid.uuid4()), "source": ids["clinic"], "target": ids["availability"]},
+        {"id": str(uuid.uuid4()), "source": ids["availability"], "sourceHandle": "success", "target": ids["services"]},
+        {"id": str(uuid.uuid4()), "source": ids["services"], "sourceHandle": "consulta", "target": ids["create"]},
+        {"id": str(uuid.uuid4()), "source": ids["create"], "sourceHandle": "success", "target": ids["handoff"]},
+        {"id": str(uuid.uuid4()), "source": ids["handoff"], "target": ids["end"]},
+    ]
+    promoted = FlowV2Publisher().publish(nodes=draft_nodes, edges=draft_edges).snapshot
+    version.nodes_snapshot = promoted["nodes"]
+    version.edges_snapshot = promoted["edges"]
+    version.manifest = {
+        "runtime": "v2", "start_node_id": promoted["start_node_id"],
+        "capabilities": ["appointment_assistant_configuration"],
+        "assistant_materialization": {
+            "schema_version": 1, "service_selection_variable": "selected_service",
+            "targets": [
+                {"parameter": "clinic_name", "node_key": "assistant.clinic_name", "field": "data.content"},
+                {"parameter": "services", "node_key": "assistant.services", "field": "data.options"},
+                {"parameter": "google_calendar_connection_id", "node_key": "assistant.calendar.1", "field": "data.connection_id"},
+                {"parameter": "google_calendar_connection_id", "node_key": "assistant.calendar.2", "field": "data.connection_id"},
+                {"parameter": "handoff.reason", "node_key": "assistant.handoff.1", "field": "data.reason"},
+            ],
+        },
+    }
+    return template, version
+
+
+def test_install_promoted_assistant_uses_real_publisher_and_keeps_placeholder(monkeypatch):
+    template, version = _promoted_assistant_version()
+    db = FakeDB(version)
+    service = _service(db)
+
+    def publish(_self, session, *, tenant_id, flow_id):
+        flow = next(item for item in session.added if isinstance(item, Flow))
+        published = FlowV2Publisher().publish(nodes=flow.nodes_json, edges=flow.edges_json)
+        flow_version = SimpleNamespace(id=uuid.uuid4(), flow_id=flow.id, tenant_id=tenant_id, graph_checksum=published.v2_snapshot_hash)
+        flow.current_version_id = flow_version.id
+        return SimpleNamespace(version=flow_version, snapshot=published.snapshot)
+
+    monkeypatch.setattr(module.FlowV2PublishService, "publish_draft", publish)
+    result = service.install(template.slug, version.id)
+
+    flow = next(item for item in db.added if isinstance(item, Flow))
+    assert len(flow.nodes_json) == len(version.nodes_snapshot) > 0
+    assert len(flow.edges_json) == len(version.edges_snapshot) > 0
+    calendar_nodes = [node for node in flow.nodes_json if node["type"] == "mcp_tool"]
+    assert calendar_nodes
+    assert all(node["data"]["connection_id"] == "{{integration.connection}}" for node in calendar_nodes)
+    assert result["template_version_id"] == str(version.id)
+    assert result["post_install_route"].endswith(result["installation_id"])
 
 
 def _successful_install(monkeypatch, role="owner"):
