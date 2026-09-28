@@ -36,6 +36,8 @@ ALLOWED_TARGETS = {
     "google_calendar_connection_id": {"data.connection_id"},
     "handoff.reason": {"data.reason"},
 }
+DEFAULT_OPERATION = "replace"
+ALLOWED_OPERATIONS = {DEFAULT_OPERATION, "interpolate"}
 
 
 def _uuid(value: object) -> UUID | None:
@@ -61,24 +63,30 @@ def _contract(version: MarketplaceTemplateVersion) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for target in targets:
-        if not isinstance(target, dict) or set(target) != {"parameter", "node_key", "field"}:
+        if not isinstance(target, dict) or not {"parameter", "node_key", "field"} <= set(target) or set(target) - {"parameter", "node_key", "field", "operation"}:
             raise HTTPException(422, "invalid_materialization_contract")
         parameter, node_key, field = target.get("parameter"), target.get("node_key"), target.get("field")
         if parameter not in ALLOWED_TARGETS or field not in ALLOWED_TARGETS[parameter]:
             raise HTTPException(422, "materialization_target_not_allowed")
         if not isinstance(node_key, str) or not node_key.strip() or len(node_key) > 120:
             raise HTTPException(422, "invalid_materialization_contract")
+        operation = target.get("operation", DEFAULT_OPERATION)
+        if operation not in ALLOWED_OPERATIONS or (operation == "interpolate" and parameter != "clinic_name"):
+            raise HTTPException(422, "materialization_operation_not_allowed")
         identity = (parameter, node_key, field)
         if identity in seen:
             raise HTTPException(422, "duplicate_materialization_target")
         seen.add(identity)
-        result.append({"parameter": parameter, "node_key": node_key, "field": field})
+        parsed = {"parameter": parameter, "node_key": node_key, "field": field}
+        if "operation" in target:
+            parsed["operation"] = operation
+        result.append(parsed)
     return result
 
 
 def build_candidate_graph(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]], configuration: AssistantConfigurationV1,
-    targets: list[dict[str, str]],
+    targets: list[dict[str, str]], source_nodes: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Validate all destinations, then mutate only a deep in-memory copy."""
     candidate_nodes, candidate_edges = copy.deepcopy(nodes), copy.deepcopy(edges)
@@ -90,12 +98,21 @@ def build_candidate_graph(
             keyed.setdefault(key, []).append(node)
     if any(len(matches) != 1 for matches in keyed.values()):
         raise HTTPException(422, "duplicate_template_node_key")
-    resolved: list[tuple[dict[str, Any], dict[str, str]]] = []
+    source_keyed: dict[str, list[dict[str, Any]]] = {}
+    for node in source_nodes if source_nodes is not None else candidate_nodes:
+        data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+        key = data.get("template_node_key")
+        if isinstance(key, str):
+            source_keyed.setdefault(key, []).append(node)
+    if any(len(matches) != 1 for matches in source_keyed.values()):
+        raise HTTPException(422, "duplicate_template_node_key")
+    resolved: list[tuple[dict[str, Any], dict[str, Any], dict[str, str]]] = []
     for target in targets:
         matches = keyed.get(target["node_key"], [])
-        if len(matches) != 1:
+        source_matches = source_keyed.get(target["node_key"], [])
+        if len(matches) != 1 or len(source_matches) != 1:
             raise HTTPException(422, "materialization_target_not_found")
-        resolved.append((matches[0], target))
+        resolved.append((matches[0], source_matches[0], target))
 
     values = {
         "clinic_name": configuration.clinic_name,
@@ -106,10 +123,17 @@ def build_candidate_graph(
         "handoff.reason": configuration.handoff.reason,
     }
     changed: set[str] = set()
-    for node, target in resolved:
+    for node, source_node, target in resolved:
         field_name = target["field"].split(".", 1)[1]
         data = node["data"]
         value = copy.deepcopy(values[target["parameter"]])
+        if target.get("operation", DEFAULT_OPERATION) == "interpolate":
+            source_data = source_node.get("data") if isinstance(source_node.get("data"), dict) else {}
+            source_value = source_data.get(field_name)
+            placeholder = "{{" + target["parameter"] + "}}"
+            if not isinstance(source_value, str) or placeholder not in source_value:
+                raise HTTPException(422, "materialization_placeholder_missing")
+            value = source_value.replace(placeholder, value)
         if data.get(field_name) != value:
             data[field_name] = value
             changed.add(target["parameter"])
@@ -163,7 +187,10 @@ def materialize_configuration(
         initial_validation = validate_flow_graph(nodes, edges, mode="draft")
         if not initial_validation["valid"]:
             raise HTTPException(422, "current_flow_invalid")
-        candidate_nodes, candidate_edges, changed = build_candidate_graph(nodes, edges, configuration, _contract(template_version))
+        candidate_nodes, candidate_edges, changed = build_candidate_graph(
+            nodes, edges, configuration, _contract(template_version),
+            source_nodes=template_version.nodes_snapshot,
+        )
         candidate_validation = validate_flow_graph(candidate_nodes, candidate_edges, mode="draft")
         if not candidate_validation["valid"]:
             raise HTTPException(422, "materialized_flow_invalid")

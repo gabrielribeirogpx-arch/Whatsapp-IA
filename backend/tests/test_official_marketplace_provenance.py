@@ -76,7 +76,7 @@ def _promoted_assistant_version():
     ids = {name: str(uuid.uuid4()) for name in ("clinic", "availability", "services", "create", "handoff", "end", "cancel_a", "cancel_b")}
     cancel_message = "Sem problema. Interrompi o agendamento por enquanto. Quando quiser continuar, é só me chamar."
     draft_nodes = [
-        {"id": ids["clinic"], "type": "message", "data": {"content": "Clínica", "isStart": True, "template_node_key": "assistant.clinic_name"}},
+        {"id": ids["clinic"], "type": "message", "data": {"content": "Olá! 👋 Você está falando com a {{clinic_name}}. Como posso ajudar?", "isStart": True, "template_node_key": "assistant.clinic_name"}},
         {"id": ids["availability"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_check_availability", "template_node_key": "assistant.calendar.1"}},
         {"id": ids["services"], "type": "choice", "options": [{"id": "consulta", "label": "Consulta"}], "data": {"options_mode": "fixed", "options": [{"id": "consulta", "label": "Consulta"}], "result_variable": "selected_service", "template_node_key": "assistant.services"}},
         {"id": ids["create"], "type": "mcp_tool", "data": {"connection_id": "{{integration.connection}}", "tool_name": "google_calendar_create_event", "template_node_key": "assistant.calendar.2"}},
@@ -103,7 +103,7 @@ def _promoted_assistant_version():
         "assistant_materialization": {
             "schema_version": 1, "service_selection_variable": "selected_service",
             "targets": [
-                {"parameter": "clinic_name", "node_key": "assistant.clinic_name", "field": "data.content"},
+                {"parameter": "clinic_name", "node_key": "assistant.clinic_name", "field": "data.content", "operation": "interpolate"},
                 {"parameter": "services", "node_key": "assistant.services", "field": "data.options"},
                 {"parameter": "google_calendar_connection_id", "node_key": "assistant.calendar.1", "field": "data.connection_id"},
                 {"parameter": "google_calendar_connection_id", "node_key": "assistant.calendar.2", "field": "data.connection_id"},

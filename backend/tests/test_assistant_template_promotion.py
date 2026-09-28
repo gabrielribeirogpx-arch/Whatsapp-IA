@@ -11,7 +11,7 @@ from app.services.official_marketplace_template_service import _assistant_contra
 def graph():
     ids = {name: uuid4() for name in ("clinic", "services", "availability", "create", "handoff", "other")}
     nodes = [
-        {"id": str(ids["clinic"]), "type": "message", "data": {"label": "Boas-vindas", "content": "Clínica antiga"}},
+        {"id": str(ids["clinic"]), "type": "message", "data": {"label": "Boas-vindas", "content": "Olá! 👋 Você está falando com a {{clinic_name}}. Como posso ajudar?"}},
         {"id": str(ids["services"]), "type": "choice", "data": {"options_mode": "fixed", "options": [{"id": "old", "value": "old"}], "result_variable": "selected_service"}},
         {"id": str(ids["availability"]), "type": "mcp_tool", "data": {"connection_id": f"integration:{uuid4()}", "tool_name": "google_calendar_check_availability", "arguments": {"unchanged": True}, "output_variable": "availability"}},
         {"id": str(ids["create"]), "type": "mcp_tool", "data": {"connection_id": f"integration:{uuid4()}", "tool_name": "google_calendar_create_event", "arguments": {"unchanged": True}, "output_variable": "created"}},
@@ -38,6 +38,7 @@ def test_explicit_mapping_builds_canonical_contract_and_sanitizes_connections():
         "clinic_name", "services", "google_calendar_connection_id",
         "google_calendar_connection_id", "handoff.reason",
     ]
+    assert contract["targets"][0]["operation"] == "interpolate"
     keys = [node["data"].get("template_node_key") for node in promoted if node["data"].get("template_node_key")]
     assert len(keys) == len(set(keys)) == 5
     calendars = [node for node in promoted if node["id"] in {str(ids["availability"]), str(ids["create"])}]
@@ -63,6 +64,13 @@ def test_choice_without_result_variable_is_rejected():
     nodes, ids, mapping = graph()
     next(node for node in nodes if node["id"] == str(ids["services"]))["data"]["result_variable"] = ""
     with pytest.raises(ValueError, match="assistant_service_selection_variable_invalid"):
+        _assistant_contract(nodes, mapping)
+
+
+def test_clinic_target_without_canonical_placeholder_is_rejected():
+    nodes, ids, mapping = graph()
+    next(node for node in nodes if node["id"] == str(ids["clinic"]))["data"]["content"] = "Clínica antiga"
+    with pytest.raises(ValueError, match="assistant_clinic_name_placeholder_missing"):
         _assistant_contract(nodes, mapping)
 
 
