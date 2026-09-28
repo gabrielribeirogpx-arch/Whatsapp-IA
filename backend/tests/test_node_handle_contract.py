@@ -82,3 +82,31 @@ def test_two_mcps_publish_contract_accepts_every_branch():
         {"id": "mcp2-timeout", "source": "mcp2", "sourceHandle": "timeout", "target": "timeout"},
     ]
     assert FlowV2GraphValidator().validate(nodes=nodes, edges=edges).is_valid
+
+
+def test_mcp_legacy_condition_alias_is_normalized_only_when_it_duplicates_handle():
+    nodes = [{"id": "mcp", "type": "mcp_tool", "data": {}}]
+    edges = [{
+        "id": "timeout", "source": "mcp", "target": "message",
+        "sourceHandle": "tempo_esgotado",
+        "data": {"condition": "tempo_esgotado", "sourceHandle": "tempo_esgotado"},
+    }]
+
+    migrated = migrate_edge_handles(nodes, edges)
+
+    assert migrated[0]["sourceHandle"] == "timeout"
+    assert migrated[0]["data"] == {"condition": "timeout", "sourceHandle": "timeout"}
+    assert edges[0]["data"]["condition"] == "tempo_esgotado"
+
+
+def test_mcp_distinct_timeout_and_error_conditions_are_never_collapsed():
+    nodes = [{"id": "mcp", "type": "mcp_tool", "data": {}}]
+    edge = {
+        "id": "timeout", "source": "mcp", "target": "message",
+        "sourceHandle": "error", "data": {"condition": "timeout"},
+    }
+
+    migrated = migrate_edge_handles(nodes, [edge])
+
+    assert migrated[0]["sourceHandle"] == "error"
+    assert migrated[0]["data"]["condition"] == "timeout"
