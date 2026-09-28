@@ -1,3 +1,6 @@
+import pytest
+
+from app.flow_v2.publisher import FlowV2Publisher
 from app.services.official_marketplace_template_service import remap_graph, sanitize_snapshot, structural_diff
 
 
@@ -41,7 +44,7 @@ def test_structural_comparator_ignores_only_graph_ids_and_timestamps():
     cloned_edges[0]["sourceHandle"] = "wrong"
     report = structural_diff(nodes, edges, cloned_nodes, cloned_edges)
     assert not report["equivalent"]
-    assert report["differences"][0]["path"] == "graph"
+    assert report["differences"][0]["path"] == "edges.sourceHandle"
 
 
 def duplicate_cancel_graph():
@@ -94,3 +97,95 @@ def test_structural_comparator_rejects_real_duplicate_graph_divergences():
     assert not changed(lambda _ns, es, _m: es.append(dict(es[0], id="extra")))["equivalent"]
     assert not changed(lambda ns, _es, _m: ns.pop())["equivalent"]
     assert not changed(lambda ns, _es, _m: ns.append(dict(ns[-1], id="extra")))["equivalent"]
+
+
+def representative_49_node_graph():
+    """Production-sized graph; synthetic because the 1.0.4 snapshot is not in git."""
+    nodes = []
+    for index in range(49):
+        node_type = "mcp_tool" if index == 10 else "message"
+        data = {"content": f"step-{index}", "template_node_key": f"representative.{index}"}
+        if index == 0:
+            data["isStart"] = True
+        if index == 48:
+            data["isEnd"] = True
+        if node_type == "mcp_tool":
+            data.update({"tool_name": "calendar.get_availability", "arguments": {"service": "consultation"},
+                         "result_variable": "availability", "connection_id": "{{integration.connection}}"})
+        nodes.append({"id": f"node-{index}", "type": node_type, "position": {"x": index * 10, "y": index * 5}, "data": data})
+    edges = []
+    for index in range(48):
+        edge = {"id": f"edge-{index}", "source": f"node-{index}", "target": f"node-{index + 1}", "targetHandle": "default"}
+        if index == 10:
+            edge["sourceHandle"] = "success"
+        edges.append(edge)
+    edges.extend([
+        {"id": "edge-extra-1", "source": "node-0", "target": "node-2", "sourceHandle": "default", "targetHandle": "default"},
+        {"id": "edge-extra-2", "source": "node-1", "target": "node-3", "sourceHandle": "default", "targetHandle": "default"},
+    ])
+    return nodes, edges
+
+
+def test_representative_49_50_remap_publish_pipeline_accepts_only_runtime_false_defaults():
+    nodes, edges = representative_49_node_graph()
+    remapped_nodes, remapped_edges, mapping = remap_graph(nodes, edges)
+    published = FlowV2Publisher().publish(nodes=remapped_nodes, edges=remapped_edges).snapshot
+
+    report = structural_diff(nodes, edges, published["nodes"], published["edges"], "node-0", published["start_node_id"])
+
+    assert report["equivalent"]
+    assert report["counts"] == {"nodes": 49, "edges": 50}
+    mcp = next(node for node in published["nodes"] if node["type"] == "mcp_tool")
+    assert mcp["data"]["allow_external_write"] is False
+    assert mcp["data"]["destructive_confirmed"] is False
+    assert mapping["node-0"] == published["start_node_id"]
+
+
+@pytest.mark.parametrize("mutation", [
+    "content", "position", "sourceHandle", "targetHandle", "condition", "remove_edge", "add_edge",
+    "remove_node", "add_node", "wrong_target", "tool_name", "arguments", "result_variable", "choice_option",
+    "template_node_key",
+])
+def test_structural_comparator_rejects_required_functional_divergences(mutation):
+    nodes, edges = graph()
+    nodes[0]["data"].update({"template_node_key": "assistant.services", "result_variable": "selected",
+                             "tool_name": "calendar.get_availability", "arguments": {"day": "today"}})
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    if mutation == "content": actual_nodes[1]["data"]["text"] = "alterado"
+    elif mutation == "position": actual_nodes[1]["position"]["x"] = 999
+    elif mutation == "sourceHandle": actual_edges[0]["sourceHandle"] = "other"
+    elif mutation == "targetHandle": actual_edges[0]["targetHandle"] = "other"
+    elif mutation == "condition": actual_edges[0]["condition"] = "different"
+    elif mutation == "remove_edge": actual_edges.pop()
+    elif mutation == "add_edge": actual_edges.append({**actual_edges[0], "id": "extra"})
+    elif mutation == "remove_node": actual_nodes.pop()
+    elif mutation == "add_node": actual_nodes.append({"id": "extra", "type": "message", "data": {"text": "extra"}})
+    elif mutation == "wrong_target": actual_edges[0]["target"] = mapping["start"]
+    elif mutation == "tool_name": actual_nodes[0]["data"]["tool_name"] = "calendar.create_appointment"
+    elif mutation == "arguments": actual_nodes[0]["data"]["arguments"]["day"] = "tomorrow"
+    elif mutation == "result_variable": actual_nodes[0]["data"]["result_variable"] = "other"
+    elif mutation == "choice_option": actual_nodes[0]["data"]["options"][0]["label"] = "Não"
+    elif mutation == "template_node_key": actual_nodes[0]["data"]["template_node_key"] = "assistant.other"
+    assert not structural_diff(nodes, edges, actual_nodes, actual_edges, "start", mapping.get("start"))["equivalent"]
+
+
+def test_structural_diagnostic_is_typed_deterministic_and_does_not_expose_content():
+    nodes, edges = graph()
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    secret_message = "patient-name token-super-secret"
+    actual_nodes[1]["data"]["text"] = secret_message
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "start", mapping["start"])
+    difference = report["differences"][0]
+    assert difference["kind"] == "node_attribute_mismatch"
+    assert difference["field"] == "data.text"
+    assert difference["actual"]["length"] == len(secret_message)
+    assert secret_message not in str(report)
+
+
+def test_explicit_true_mcp_permission_remains_a_functional_divergence():
+    nodes, edges = representative_49_node_graph()
+    actual_nodes, actual_edges, mapping = remap_graph(nodes, edges)
+    next(node for node in actual_nodes if node["type"] == "mcp_tool")["data"]["allow_external_write"] = True
+    report = structural_diff(nodes, edges, actual_nodes, actual_edges, "node-0", mapping["node-0"])
+    assert not report["equivalent"]
+    assert report["differences"][0]["kind"] == "node_attribute_mismatch"
