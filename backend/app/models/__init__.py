@@ -49,3 +49,6 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.product_analytics import ProductEvent, ProductMetricDaily, TenantActivationState
 
 from app.models.tenant_appointment_policy import TenantAppointmentPolicy
+from app.models.native_calendar import Appointment, AvailabilityRule, CalendarBlock, CalendarResource, NativeCalendar
+
+__all__ += ["NativeCalendar", "CalendarResource", "AvailabilityRule", "CalendarBlock", "Appointment"]
