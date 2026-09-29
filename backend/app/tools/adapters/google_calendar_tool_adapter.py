@@ -22,6 +22,10 @@ from app.core.appointment_metadata import (
 from app.core.external_identity import ExternalReferenceError
 from app.models.integration_connection import IntegrationConnection
 from app.services.google_calendar_service import PROVIDER, GoogleCalendarService
+from app.services.calendar_provider_resolver import (
+    CalendarProviderResolutionError,
+    CalendarProviderResolver,
+)
 from app.tools.base import NormalizedToolResult, ToolResult
 from app.tools.context import ToolContext, sanitize_metadata
 
@@ -485,13 +489,19 @@ class GoogleCalendarToolAdapter:
         try:
             factory_parameters = inspect.signature(self.service_factory).parameters
             if len(factory_parameters) >= 3:
-                service = self.service_factory(
-                    db, context.tenant_id, context.integration_connection_id,
-                )
+                provider = CalendarProviderResolver(
+                    db, service_factory=self.service_factory,
+                    validate_binding=self.service_factory is GoogleCalendarService,
+                ).resolve(context)
             else:
-                # Test/legacy injection compatibility only. The production
-                # factory always receives the validated connection id.
-                service = self.service_factory(db, context.tenant_id)
+                # Test/legacy injection compatibility only. Production always
+                # receives and validates the exact connection from ToolContext.
+                legacy_factory = lambda provider_db, tenant_id, _connection_id: self.service_factory(  # noqa: E731
+                    provider_db, tenant_id
+                )
+                provider = CalendarProviderResolver(
+                    db, service_factory=legacy_factory, validate_binding=False,
+                ).resolve(context)
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_CALL", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
@@ -504,15 +514,15 @@ class GoogleCalendarToolAdapter:
                 if appointment_metadata is None:
                     # LEGACY UNMANAGED EVENT: preserve the historical call when
                     # no trusted patient identity is available.
-                    result = service.create_event(**args)
+                    result = provider.create_event(**args)
                 else:
-                    result = service.create_event(
+                    result = provider.create_event(
                         **{key: value for key, value in args.items() if key != "asa_private_metadata"},
                         asa_private_metadata=appointment_metadata,
                     )
                 action = "create_event"
             elif tool_id == "google_calendar_find_managed_appointments":
-                result = service.find_managed_appointments(
+                result = provider.find_managed_appointments(
                     start=args["start"],
                     end=args["end"],
                     timezone=args.get("timezone"),
@@ -521,7 +531,7 @@ class GoogleCalendarToolAdapter:
                 )
                 action = "find_managed_appointments"
             elif tool_id in {"google_calendar_list_events", "calendar.get_appointment"}:
-                result = service.list_events(**args)
+                result = provider.list_events(**args)
                 action = "list_events"
             elif tool_id in {"google_calendar_check_availability", "calendar.get_availability"}:
                 from app.services.appointment_duration_service import (
@@ -554,13 +564,13 @@ class GoogleCalendarToolAdapter:
                     duration_minutes=effective.duration_minutes,
                 )
                 # Private kwarg is resolved from server-owned provenance, never tool input.
-                result = service.check_availability(
+                result = provider.check_availability(
                     **{key: value for key, value in args.items() if key != "_effective_duration_minutes"},
                     _effective_duration_minutes=effective.duration_minutes,
                 )
                 action = "check_availability"
             elif tool_id in {"google_calendar_delete_event", "calendar.cancel_appointment"}:
-                result = service.delete_event(str(args.get("event_id") or args.get("id") or ""))
+                result = provider.delete_event(str(args.get("event_id") or args.get("id") or ""))
                 action = "delete_event"
             elif tool_id in {"google_calendar_update_event", "calendar.reschedule_appointment"}:
                 event_id = str(args.get("event_id") or args.get("id") or "")
@@ -570,17 +580,19 @@ class GoogleCalendarToolAdapter:
                 }
                 if tool_id == "google_calendar_update_event":
                     # Authorization material comes only from trusted ToolContext.
-                    result = service.update_event(
+                    result = provider.update_event(
                         event_id,
                         expected_private_metadata=appointment_metadata,
                         **update_kwargs,
                     )
                 else:
-                    result = service.update_event(event_id, **update_kwargs)
+                    result = provider.update_event(event_id, **update_kwargs)
                 action = "update_event"
             else:
                 result = {"ok": False, "message": "Ferramenta Google Calendar não encontrada."}
                 action = "unknown"
+        except CalendarProviderResolutionError as exc:
+            return _calendar_failure(tool_id, exc.code)
         except Exception as exc:
             from app.services.appointment_policy_service import AppointmentPolicyError
 
