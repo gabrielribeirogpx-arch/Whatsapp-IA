@@ -10,9 +10,11 @@ from app.models.integration_connection import IntegrationConnection
 from app.services.calendar_provider import CalendarProvider
 from app.services.google_calendar_provider import GoogleCalendarProvider
 from app.services.google_calendar_service import GoogleCalendarService
+from app.services.wazza_native_calendar_provider import WazzaNativeCalendarProvider
 from app.tools.context import ToolContext
 
 GOOGLE_CALENDAR_PROVIDER = "google_calendar"
+WAZZA_NATIVE_PROVIDER = "wazza_native"
 
 
 class CalendarProviderResolutionError(RuntimeError):
@@ -41,11 +43,26 @@ class CalendarProviderResolver:
         self,
         context: ToolContext,
         *,
-        provider: str = GOOGLE_CALENDAR_PROVIDER,
+        provider: str | None = None,
     ) -> CalendarProvider:
+        trusted_provider = context.calendar_provider or GOOGLE_CALENDAR_PROVIDER
+        if provider is not None and provider != trusted_provider:
+            raise CalendarProviderResolutionError("calendar_provider_context_mismatch")
+        provider = trusted_provider
+        if provider == WAZZA_NATIVE_PROVIDER:
+            if (context.tenant_id is None or context.contact_id is None
+                    or context.native_calendar_id is None or context.native_resource_id is None
+                    or context.integration_connection_id is not None):
+                raise CalendarProviderResolutionError("wazza_native_binding_required")
+            return WazzaNativeCalendarProvider(
+                self._db, context.tenant_id, context.contact_id,
+                context.native_calendar_id, context.native_resource_id,
+            )
         if provider != GOOGLE_CALENDAR_PROVIDER:
             raise CalendarProviderResolutionError("calendar_provider_unsupported")
         if context.tenant_id is None:
+            raise CalendarProviderResolutionError("google_calendar_connection_required")
+        if context.native_calendar_id is not None or context.native_resource_id is not None:
             raise CalendarProviderResolutionError("google_calendar_connection_required")
 
         # The binding comes exclusively from ToolContext. Tool arguments never

@@ -15,6 +15,7 @@ from app.flow_v2.contracts import FlowV2EventType
 from app.flow_v2.executors.base_executor import BaseNodeExecutor, NodeExecutionResult
 from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.models.integration_connection import IntegrationConnection
+from app.models.marketplace_installation import AssistantCalendarBinding, MarketplaceInstallationResource
 from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter, GOOGLE_CALENDAR_TOOL_IDS, google_calendar_tool_definitions
 from app.tools.context import ToolContext
 from app.services.mcp_service import MCPError, call_mcp_tool
@@ -95,6 +96,9 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
     def _trusted_tool_context(
         *, snapshot: Any, session: Any, node_id: str,
         integration_connection_id: uuid.UUID | None = None,
+        calendar_provider: str | None = None,
+        native_calendar_id: uuid.UUID | None = None,
+        native_resource_id: uuid.UUID | None = None,
     ) -> ToolContext:
         """Build tool identity exclusively from server-owned runtime objects."""
         return ToolContext(
@@ -108,6 +112,9 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
             external_user_id=getattr(session, "external_user_id", None),
             runtime_variables=dict(getattr(session, "variables", None) or {}),
             integration_connection_id=integration_connection_id,
+            calendar_provider=calendar_provider,
+            native_calendar_id=native_calendar_id,
+            native_resource_id=native_resource_id,
         )
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
@@ -179,6 +186,44 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 _store_tool_output(db, session=session, output_variable=str(data["output_variable"]), output=output)
                 handle = "success"
                 raise StopIteration
+            if connection_kind == "assistant_calendar":
+                binding = db.execute(select(AssistantCalendarBinding).join(
+                    MarketplaceInstallationResource,
+                    MarketplaceInstallationResource.installation_id == AssistantCalendarBinding.installation_id,
+                ).where(
+                    AssistantCalendarBinding.id == parsed_connection_id,
+                    AssistantCalendarBinding.tenant_id == session.tenant_id,
+                    MarketplaceInstallationResource.resource_type == "flow",
+                    MarketplaceInstallationResource.resource_id == str(getattr(snapshot, "flow_id", "")),
+                )).scalars().first()
+                if binding is None:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "O vínculo de agenda não está autorizado.")
+                if tool_name not in GOOGLE_CALENDAR_TOOL_IDS:
+                    raise MCPNodeError("MCP_TOOL_NOT_FOUND", "A ferramenta não está disponível neste vínculo.")
+                definitions = {item["tool_name"]: item for item in google_calendar_tool_definitions(connected=True)}
+                classification = str(definitions[tool_name]["metadata"].get("classification") or "READ").upper()
+                if classification in {"WRITE", "DESTRUCTIVE"} and data.get("allow_external_write") is not True:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "Esta ação exige confirmação explícita para alterar dados.")
+                if classification == "DESTRUCTIVE" and data.get("destructive_confirmed") is not True:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "A ação destrutiva exige confirmação explícita.")
+                arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session,
+                                         runtime_input=runtime_input, node_id=node_id)
+                context = self._trusted_tool_context(
+                    snapshot=snapshot, session=session, node_id=node_id,
+                    integration_connection_id=binding.integration_connection_id,
+                    calendar_provider=binding.provider,
+                    native_calendar_id=binding.native_calendar_id,
+                    native_resource_id=binding.native_resource_id,
+                )
+                result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, context)
+                if not result.ok:
+                    raise MCPNodeError(str(result.error_code or "MCP_TOOL_EXECUTION_FAILED"),
+                                       str(result.error_message or "A agenda não concluiu a execução."), True)
+                output = result.output
+                output = safe_get_path(output, data.get("result_path")) if data.get("result_path") else output
+                _store_tool_output(db, session=session, output_variable=str(data["output_variable"]), output=output)
+                handle = "success"
+                raise StopIteration
             if connection_kind != "mcp":
                 raise MCPNodeError("MCP_CONNECTION_NOT_FOUND", "A conexão MCP não foi encontrada.")
             server = db.execute(select(TenantMCPServer).where(TenantMCPServer.id == parsed_connection_id, TenantMCPServer.tenant_id == session.tenant_id)).scalars().first()
@@ -236,13 +281,15 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
             variables = dict(getattr(session, "variables", None) or {})
             variables[str(data.get("error_variable") or "mcp_error")] = exc.safe_value()
             session.variables = variables
-            db.add(session); db.flush()
+            db.add(session)
+            db.flush()
             logger.info("event=RUNTIME_V2_MCP_TOOL_ERROR session_id=%s node_id=%s tool_name=%s error_code=%s retryable=%s attempt=%s source_handle=%s", session.id, node_id, tool_name, exc.code, exc.retryable, attempt, handle)
-        except (MCPError, ValueError, TypeError) as exc:
+        except (MCPError, ValueError, TypeError):
             variables = dict(getattr(session, "variables", None) or {})
             variables[str(data.get("error_variable") or "mcp_error")] = {"code": "MCP_TOOL_EXECUTION_FAILED", "message": "Não foi possível executar a ferramenta MCP.", "retryable": False}
             session.variables = variables
-            db.add(session); db.flush()
+            db.add(session)
+            db.flush()
             logger.info("event=RUNTIME_V2_MCP_TOOL_ERROR session_id=%s node_id=%s tool_name=%s error_code=MCP_TOOL_EXECUTION_FAILED retryable=false attempt=%s source_handle=error", session.id, node_id, tool_name, attempt)
         resolution = self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=handle)
         next_id = resolution.target_node_id

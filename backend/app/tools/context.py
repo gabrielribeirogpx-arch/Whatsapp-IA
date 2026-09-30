@@ -37,6 +37,11 @@ class ToolContext:
     # Canonical server-validated integration identity. Credentials never cross
     # the runtime/tool boundary.
     integration_connection_id: Any | None = None
+    # Server-resolved assistant calendar binding. Tool arguments never populate
+    # these fields.
+    calendar_provider: str | None = None
+    native_calendar_id: Any | None = None
+    native_resource_id: Any | None = None
     # Snapshot of server-owned session variables; never populated from tool args.
     runtime_variables: dict[str, Any] = field(default_factory=dict)
 

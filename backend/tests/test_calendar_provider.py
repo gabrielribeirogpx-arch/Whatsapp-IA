@@ -101,13 +101,21 @@ def test_resolver_fails_closed_for_invalid_connection_binding(connection_changes
     assert error.value.code == "google_calendar_connection_required"
 
 
-def test_resolver_rejects_model_selected_provider():
+def test_resolver_rejects_unsupported_provider():
     with pytest.raises(CalendarProviderResolutionError) as error:
         CalendarProviderResolver(_Db()).resolve(
-            ToolContext(tenant_id=uuid.uuid4()), provider="wazza_native"
+            ToolContext(tenant_id=uuid.uuid4(), calendar_provider="model_selected")
         )
 
     assert error.value.code == "calendar_provider_unsupported"
+
+
+def test_native_provider_requires_complete_server_binding():
+    with pytest.raises(CalendarProviderResolutionError) as error:
+        CalendarProviderResolver(_Db()).resolve(
+            ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4(), calendar_provider="wazza_native")
+        )
+    assert error.value.code == "wazza_native_binding_required"
 
 
 def test_google_provider_is_a_transparent_delegate_for_every_real_operation():

@@ -23,6 +23,10 @@ test('save is explicit and activation is blocked by unsaved changes', () => {
 });
 
 test('calendar selection is explicit, tenant options come from read model and never autosave', () => {
+  assert.match(client, /Agenda Wazza/);
+  assert.match(client, /name="calendar-provider"/);
+  assert.match(client, /provider: 'wazza_native'/);
+  assert.match(client, /Não requer conexão externa/);
   assert.match(api, /available_connections: Array/);
   assert.match(client, /snapshot\.calendar\.available_connections\.map/);
   assert.match(client, /Agenda do Google/);

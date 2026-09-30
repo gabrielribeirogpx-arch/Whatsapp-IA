@@ -1,14 +1,14 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 class MarketplaceInstallation(Base):
     __tablename__ = "marketplace_installations"
-    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_marketplace_installation_tenant_key"), Index("ix_marketplace_installations_tenant_slug", "tenant_id", "template_slug"), Index("ix_marketplace_installations_tenant_status", "tenant_id", "status"))
+    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_marketplace_installation_tenant_key"), UniqueConstraint("tenant_id", "id", name="uq_marketplace_installations_tenant_id_id"), Index("ix_marketplace_installations_tenant_slug", "tenant_id", "template_slug"), Index("ix_marketplace_installations_tenant_status", "tenant_id", "status"))
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     template_id: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -34,6 +34,31 @@ class MarketplaceInstallation(Base):
     resources: Mapped[list["MarketplaceInstallationResource"]] = relationship(cascade="all, delete-orphan", back_populates="installation")
     assistant_configuration: Mapped["MarketplaceInstallationAssistantConfiguration | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
     flow_management: Mapped["MarketplaceInstallationFlowManagement | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
+    calendar_binding: Mapped["AssistantCalendarBinding | None"] = relationship(cascade="all, delete-orphan", back_populates="installation", uselist=False)
+
+class AssistantCalendarBinding(Base):
+    """Server-owned, mutually-exclusive calendar binding for one assistant."""
+    __tablename__ = "assistant_calendar_bindings"
+    __table_args__ = (
+        CheckConstraint("provider IN ('google_calendar', 'wazza_native')", name="ck_assistant_calendar_binding_provider"),
+        CheckConstraint(
+            "(provider = 'google_calendar' AND integration_connection_id IS NOT NULL AND native_calendar_id IS NULL AND native_resource_id IS NULL) OR "
+            "(provider = 'wazza_native' AND integration_connection_id IS NULL AND native_calendar_id IS NOT NULL AND native_resource_id IS NOT NULL)",
+            name="ck_assistant_calendar_binding_shape",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_assistant_calendar_bindings_tenant_id_id"),
+        ForeignKeyConstraint(["tenant_id", "installation_id"], ["marketplace_installations.tenant_id", "marketplace_installations.id"], ondelete="CASCADE", name="fk_assistant_calendar_binding_tenant_installation"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    installation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    integration_connection_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("integration_connections.id", ondelete="RESTRICT"))
+    native_calendar_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("native_calendars.id", ondelete="RESTRICT"))
+    native_resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("calendar_resources.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    installation: Mapped[MarketplaceInstallation] = relationship(back_populates="calendar_binding")
 
 class MarketplaceInstallationFlowManagement(Base):
     """Server-owned baseline for the Flow created by an installation."""

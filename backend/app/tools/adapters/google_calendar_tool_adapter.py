@@ -397,7 +397,8 @@ class GoogleCalendarToolAdapter:
             "google_calendar_find_managed_appointments",
             "google_calendar_update_event",
         }
-        if tool_id in bound_tools and context.integration_connection_id is None:
+        if (tool_id in bound_tools and context.integration_connection_id is None
+                and context.calendar_provider != "wazza_native"):
             return _calendar_failure(tool_id, "google_calendar_connection_required")
         _log_tool("GOOGLE_CALENDAR_TOOL_START", tenant_id=context.tenant_id, tool_name=tool_id, input=input, db=db)
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
