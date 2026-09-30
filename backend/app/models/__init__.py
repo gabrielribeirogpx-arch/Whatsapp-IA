@@ -8,7 +8,7 @@ from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_source import KnowledgeSource
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage
-from app.models.marketplace_installation import MarketplaceInstallation, MarketplaceInstallationAssistantConfiguration, MarketplaceInstallationFlowManagement, MarketplaceInstallationResource
+from app.models.marketplace_installation import AssistantCalendarBinding, MarketplaceInstallation, MarketplaceInstallationAssistantConfiguration, MarketplaceInstallationFlowManagement, MarketplaceInstallationResource
 from app.models.marketplace_template import MarketplaceTemplate, MarketplaceTemplateVersion
 from app.models.bot_rule import BotRule
 from app.models.conversation_log import ConversationLog

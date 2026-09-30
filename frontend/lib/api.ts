@@ -377,14 +377,15 @@ export type AppointmentAssistantConfiguration = {
   schema_version: 1;
   clinic_name: string;
   services: AppointmentServiceConfiguration[];
-  google_calendar_connection_id: string;
+  google_calendar_connection_id: string | null;
+  calendar: { provider: 'wazza_native' | 'google_calendar'; timezone?: string | null; business_hours?: Record<string, Array<{ start: string; end: string }>> | null; resource_name?: string | null };
   handoff: AppointmentHandoffConfiguration;
 };
 export type AppointmentConfigurator = {
   installation_id: string;
   assistant: { type: 'appointment'; template_id: string; template_version_id: string | null; flow_id: string | null; flow_name: string | null; status: AppointmentAssistantStatus };
   configuration: { status: 'configured' | 'needs_configuration'; version: number; clinic_name: string | null; services: AppointmentServiceConfiguration[]; handoff: AppointmentHandoffConfiguration | null };
-  calendar: { connection_id: string | null; status: AppointmentCalendarStatus; provider: 'google_calendar'; available_connections: Array<{ id: string; status: 'active'; label: string }> };
+  calendar: { connection_id: string | null; status: AppointmentCalendarStatus; provider: 'wazza_native' | 'google_calendar'; binding_id: string | null; native_calendar_id: string | null; native_resource_id: string | null; available_connections: Array<{ id: string; status: 'active'; label: string }> };
   scheduling: { scope: 'workspace'; timezone: string; business_hours: Record<string, Array<{ start: string; end: string }>>; slot_interval_minutes: number; default_duration_minutes: number } | null;
   management: { mode: 'managed' | 'customized' | 'unknown' | 'inconsistent'; has_drift: boolean | null };
   activation: { active: boolean; up_to_date: boolean; needs_activation: boolean; would_replace_active_flow: boolean };

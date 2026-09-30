@@ -59,6 +59,16 @@ def test_materialization_changes_only_declared_fields_and_ignores_duration():
     assert changed == ["clinic_name", "google_calendar_connection_id", "handoff.reason", "services"]
 
 
+def test_provider_agnostic_binding_reference_is_materialized_server_side():
+    nodes, edges = graph()
+    binding_id = uuid4()
+    candidate, _, _ = build_candidate_graph(
+        nodes, edges, configuration(), TARGETS,
+        calendar_connection_reference=f"assistant_calendar:{binding_id}",
+    )
+    assert candidate[2]["data"]["connection_id"] == f"assistant_calendar:{binding_id}"
+
+
 def test_clinic_name_interpolation_preserves_surrounding_message_and_is_idempotent():
     nodes, edges = graph()
     nodes[0]["data"]["message"] = "Olá! Bem-vindo à {{clinic_name}}. Como posso ajudar?"

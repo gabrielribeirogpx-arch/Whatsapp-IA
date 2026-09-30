@@ -7,7 +7,6 @@ from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.integration_connection import IntegrationConnection
 from app.models.marketplace_installation import (
     MarketplaceInstallation,
     MarketplaceInstallationAssistantConfiguration,
@@ -15,6 +14,7 @@ from app.models.marketplace_installation import (
 from app.models.user import TenantUser
 from app.schemas.assistant_configuration import AssistantConfigurationUpdate
 from app.services.audit_service import write_audit_log
+from app.services.assistant_calendar_binding_service import bind_assistant_calendar
 
 CAPABILITY = "appointment_assistant_configuration"
 # These are server-owned built-in catalog identities, not values supplied by clients.
@@ -84,15 +84,10 @@ def update_configuration(
             "current_configuration_version": current_version,
         })
 
-    connection_id = payload.configuration.google_calendar_connection_id
-    connection = db.scalar(select(IntegrationConnection).where(
-        IntegrationConnection.id == connection_id,
-        IntegrationConnection.tenant_id == tenant_id,
-        IntegrationConnection.provider == "google_calendar",
-        IntegrationConnection.status == "active",
-    ))
-    if connection is None:
-        raise HTTPException(status_code=422, detail="invalid_google_calendar_connection")
+    bind_assistant_calendar(
+        db, installation=installation, configuration=payload.configuration,
+        actor_id=actor.id, request=request,
+    )
 
     before = dict(row.configuration) if row else None
     after = payload.configuration.model_dump(mode="json")

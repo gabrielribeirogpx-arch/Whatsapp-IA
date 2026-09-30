@@ -155,7 +155,9 @@ def test_civil_timezone_and_new_york_dst(setup, timezone_name, day, weekday):
 
 def test_resolver_returns_protocol_native_provider_from_server_binding(setup):
     db, tenant, contact, other, service, calendar, resource, provider = setup
-    resolved = CalendarProviderResolver(db, native_calendar_id=calendar.id, native_resource_id=resource.id).resolve(
-        ToolContext(tenant_id=tenant.id, contact_id=contact.id), provider="wazza_native")
+    resolved = CalendarProviderResolver(db).resolve(ToolContext(
+        tenant_id=tenant.id, contact_id=contact.id, calendar_provider="wazza_native",
+        native_calendar_id=calendar.id, native_resource_id=resource.id,
+    ))
     assert isinstance(resolved, WazzaNativeCalendarProvider)
     assert isinstance(resolved, CalendarProvider)

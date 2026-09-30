@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session
 from app.models import Flow, MarketplaceTemplateVersion
 from app.models.integration_connection import IntegrationConnection
 from app.models.marketplace_installation import (
+    AssistantCalendarBinding,
     MarketplaceInstallationAssistantConfiguration,
     MarketplaceInstallationFlowManagement,
 )
 from app.schemas.assistant_configuration import AssistantConfigurationV1, AssistantMaterializationRequest
 from app.services.assistant_configuration_service import CAPABILITY, get_installation_for_configuration
+from app.services.assistant_calendar_binding_service import binding_is_valid
 from app.services.assistant_flow_management_service import assert_managed_flow_baseline
 from app.services.audit_service import write_audit_log
 from app.services.flow_engine_service import flow_version_nodes_edges, graph_hash, validate_flow_graph
@@ -87,6 +89,7 @@ def _contract(version: MarketplaceTemplateVersion) -> list[dict[str, str]]:
 def build_candidate_graph(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]], configuration: AssistantConfigurationV1,
     targets: list[dict[str, str]], source_nodes: list[dict[str, Any]] | None = None,
+    calendar_connection_reference: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Validate all destinations, then mutate only a deep in-memory copy."""
     candidate_nodes, candidate_edges = copy.deepcopy(nodes), copy.deepcopy(edges)
@@ -118,7 +121,7 @@ def build_candidate_graph(
         "clinic_name": configuration.clinic_name,
         # duration_minutes deliberately remains solely in canonical configuration.
         "services": [{"id": service.id, "label": service.label, "value": service.id} for service in configuration.services],
-        "google_calendar_connection_id": f"integration:{configuration.google_calendar_connection_id}",
+        "google_calendar_connection_id": calendar_connection_reference or f"integration:{configuration.google_calendar_connection_id}",
         # enabled is intentionally not represented: V1 never removes graph structure.
         "handoff.reason": configuration.handoff.reason,
     }
@@ -171,14 +174,30 @@ def materialize_configuration(
             raise HTTPException(422, "invalid_template_provenance")
 
         configuration = AssistantConfigurationV1.model_validate(configuration_row.configuration)
-        connection = db.scalar(select(IntegrationConnection).where(
-            IntegrationConnection.id == configuration.google_calendar_connection_id,
-            IntegrationConnection.tenant_id == tenant_id,
-            IntegrationConnection.provider == "google_calendar",
-            IntegrationConnection.status == "active",
+        binding = db.scalar(select(AssistantCalendarBinding).where(
+            AssistantCalendarBinding.installation_id == installation.id,
+            AssistantCalendarBinding.tenant_id == tenant_id,
         ))
-        if connection is None:
-            raise HTTPException(422, "invalid_google_calendar_connection")
+        if binding is None:
+            # Backward-compatible read path for configurations persisted before
+            # assistant calendar bindings existed.
+            if configuration.effective_calendar_provider != "google_calendar":
+                raise HTTPException(422, "assistant_calendar_binding_required")
+            connection = db.scalar(select(IntegrationConnection).where(
+                IntegrationConnection.id == configuration.google_calendar_connection_id,
+                IntegrationConnection.tenant_id == tenant_id,
+                IntegrationConnection.provider == "google_calendar",
+                IntegrationConnection.status == "active",
+            ))
+            if connection is None:
+                raise HTTPException(422, "invalid_google_calendar_connection")
+            calendar_reference = f"integration:{configuration.google_calendar_connection_id}"
+        else:
+            if binding.provider != configuration.effective_calendar_provider:
+                raise HTTPException(422, "assistant_calendar_binding_invalid")
+            if not binding_is_valid(db, binding):
+                raise HTTPException(422, "assistant_calendar_binding_invalid")
+            calendar_reference = f"assistant_calendar:{binding.id}"
 
         current = flow.current_version
         if current is None or current.id != state.current_flow_version_id:
@@ -190,6 +209,7 @@ def materialize_configuration(
         candidate_nodes, candidate_edges, changed = build_candidate_graph(
             nodes, edges, configuration, _contract(template_version),
             source_nodes=template_version.nodes_snapshot,
+            calendar_connection_reference=calendar_reference,
         )
         candidate_validation = validate_flow_graph(candidate_nodes, candidate_edges, mode="draft")
         if not candidate_validation["valid"]:

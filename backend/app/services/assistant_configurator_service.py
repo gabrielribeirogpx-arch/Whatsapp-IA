@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import AuditLog, Flow
 from app.models.integration_connection import IntegrationConnection
-from app.models.marketplace_installation import MarketplaceInstallation
+from app.models.marketplace_installation import AssistantCalendarBinding, MarketplaceInstallation
+from app.models.native_calendar import CalendarResource, NativeCalendar
 from app.models.user import TenantUser
 from app.schemas.assistant_configuration import AssistantConfigurationV1
 from app.security.workspace_rbac import PERMISSION_MATRIX, WorkspacePermission, canonical_role
@@ -66,16 +67,33 @@ class AssistantConfiguratorService:
                 pass
 
         connection = None
+        binding = self.db.scalar(select(AssistantCalendarBinding).where(
+            AssistantCalendarBinding.installation_id == installation.id,
+            AssistantCalendarBinding.tenant_id == tenant_id,
+        ))
         calendar_status = "not_configured"
         available_connections = self._available_calendar_connections(tenant_id)
-        connection_id = configuration.google_calendar_connection_id if configuration else None
-        if connection_id:
+        provider = binding.provider if binding else (configuration.effective_calendar_provider if configuration else "wazza_native")
+        connection_id = binding.integration_connection_id if binding else (
+            configuration.google_calendar_connection_id if configuration else None)
+        native_calendar_id = binding.native_calendar_id if binding else None
+        native_resource_id = binding.native_resource_id if binding else None
+        if provider == "google_calendar" and connection_id:
             connection = self.db.scalar(select(IntegrationConnection).where(
                 IntegrationConnection.id == connection_id,
                 IntegrationConnection.tenant_id == tenant_id,
                 IntegrationConnection.provider == "google_calendar",
             ))
             calendar_status = "missing" if connection is None else ("connected" if connection.status == "active" else "inactive")
+        elif provider == "wazza_native" and binding:
+            native_calendar = self.db.scalar(select(NativeCalendar).where(
+                NativeCalendar.id == native_calendar_id, NativeCalendar.tenant_id == tenant_id,
+            ))
+            native_resource = self.db.scalar(select(CalendarResource).where(
+                CalendarResource.id == native_resource_id, CalendarResource.tenant_id == tenant_id,
+                CalendarResource.calendar_id == native_calendar_id,
+            ))
+            calendar_status = "connected" if native_calendar and native_resource and native_calendar.active and native_resource.active else "missing"
 
         scheduling = None
         policy_valid = True
@@ -132,7 +150,10 @@ class AssistantConfiguratorService:
             "calendar": {
                 "connection_id": connection_id,
                 "status": calendar_status,
-                "provider": "google_calendar",
+                "provider": provider,
+                "binding_id": binding.id if binding else None,
+                "native_calendar_id": native_calendar_id,
+                "native_resource_id": native_resource_id,
                 "available_connections": [
                     {
                         "id": item.id,

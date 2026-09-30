@@ -9,7 +9,7 @@ export const STATUS_LABELS = {
 export const NOTICE_MESSAGES: Record<string, string> = {
   assistant_configuration_required: 'Complete os dados do assistente antes de ativá-lo.',
   assistant_flow_customized: 'Este assistente foi personalizado no modo avançado.',
-  assistant_calendar_connection_required: 'Conecte o Google Calendar para ativar o assistente.',
+  assistant_calendar_connection_required: 'Configure uma agenda para ativar o assistente.',
   assistant_calendar_connection_inactive: 'Reconecte o Google Calendar para continuar.',
   assistant_management_unknown: 'Esta instalação precisa ser revisada no modo avançado.',
   assistant_management_inconsistent: 'Esta instalação precisa ser revisada no modo avançado.',
@@ -31,7 +31,13 @@ export function configurationFrom(snapshot: AppointmentConfigurator): Appointmen
     schema_version: 1,
     clinic_name: snapshot.configuration.clinic_name || '',
     services: snapshot.configuration.services.length ? snapshot.configuration.services.map((item) => ({ ...item })) : [{ id: 'consulta', label: 'Consulta', duration_minutes: 30 }],
-    google_calendar_connection_id: connectionId,
+    google_calendar_connection_id: snapshot.calendar.provider === 'google_calendar' ? connectionId : null,
+    calendar: {
+      provider: snapshot.calendar.provider,
+      timezone: snapshot.scheduling?.timezone || '',
+      business_hours: snapshot.scheduling?.business_hours || {},
+      resource_name: 'Profissional principal',
+    },
     handoff: snapshot.configuration.handoff ? { ...snapshot.configuration.handoff } : { enabled: true, reason: 'Solicitação do paciente' },
   };
 }

@@ -5,6 +5,7 @@ import unicodedata
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -61,11 +62,40 @@ class AssistantHandoffV1(StrictModel):
         return self
 
 
+class AssistantCalendarV1(StrictModel):
+    provider: Literal["google_calendar", "wazza_native"]
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    business_hours: dict[str, list[dict[str, str]]] | None = None
+    resource_name: str | None = Field(default=None, min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_native_schedule(self):
+        if self.provider == "wazza_native":
+            if not self.timezone or self.business_hours is None:
+                raise ValueError("native_calendar_schedule_required")
+            try:
+                ZoneInfo(self.timezone)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("invalid_calendar_timezone") from exc
+            allowed = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+            if set(self.business_hours) - allowed:
+                raise ValueError("invalid_business_hours_day")
+            for periods in self.business_hours.values():
+                for period in periods:
+                    if set(period) != {"start", "end"} or not re.fullmatch(r"\d{2}:\d{2}", period["start"]) or not re.fullmatch(r"\d{2}:\d{2}", period["end"]):
+                        raise ValueError("invalid_business_hours")
+                    if period["start"] >= period["end"]:
+                        raise ValueError("invalid_business_hours")
+        return self
+
+
 class AssistantConfigurationV1(StrictModel):
     schema_version: Literal[1]
     clinic_name: str = Field(min_length=2, max_length=160)
     services: list[AssistantServiceV1] = Field(min_length=1, max_length=50)
-    google_calendar_connection_id: UUID
+    # Kept for legacy clients. An explicit calendar binding is authoritative.
+    google_calendar_connection_id: UUID | None = None
+    calendar: AssistantCalendarV1 | None = None
     handoff: AssistantHandoffV1
 
     @field_validator("clinic_name")
@@ -81,7 +111,19 @@ class AssistantConfigurationV1(StrictModel):
         ids = [service.id for service in self.services]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate_service_id")
+        if self.calendar is None:
+            if self.google_calendar_connection_id is None:
+                raise ValueError("calendar_binding_required")
+        elif self.calendar.provider == "google_calendar":
+            if self.google_calendar_connection_id is None:
+                raise ValueError("google_calendar_connection_required")
+        elif self.google_calendar_connection_id is not None:
+            raise ValueError("hybrid_calendar_binding_not_allowed")
         return self
+
+    @property
+    def effective_calendar_provider(self) -> str:
+        return self.calendar.provider if self.calendar is not None else "google_calendar"
 
 
 class AssistantConfigurationUpdate(StrictModel):
@@ -171,7 +213,10 @@ class ConfiguratorAssistant(StrictModel):
 class ConfiguratorCalendar(StrictModel):
     connection_id: UUID | None
     status: Literal["connected", "inactive", "missing", "not_configured"]
-    provider: Literal["google_calendar"]
+    provider: Literal["google_calendar", "wazza_native"]
+    binding_id: UUID | None = None
+    native_calendar_id: UUID | None = None
+    native_resource_id: UUID | None = None
     available_connections: list["ConfiguratorCalendarConnection"]
 
 
