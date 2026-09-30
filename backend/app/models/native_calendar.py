@@ -155,6 +155,11 @@ class _InstantRangeMixin:
     def validate_range(self, key: str, value: datetime) -> datetime:
         value = _validate_instant(value)
         other = getattr(self, "end_at" if key == "start_at" else "start_at", None)
+        # SQLite drops tzinfo when materializing DateTime(timezone=True). The
+        # persistence contract stores UTC instants, so normalize that test-only
+        # representation before comparing; PostgreSQL values remain aware.
+        if other is not None and (other.tzinfo is None or other.utcoffset() is None):
+            other = other.replace(tzinfo=timezone.utc)
         if other is not None and ((key == "start_at" and value >= other) or (key == "end_at" and other >= value)):
             raise ValueError("start_must_precede_end")
         return value
