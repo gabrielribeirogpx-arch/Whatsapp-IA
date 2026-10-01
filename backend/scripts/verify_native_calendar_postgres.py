@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, time as wall_time, timezone
-from queue import Queue
+from threading import Event
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -40,7 +40,9 @@ EXPECTED_REVISION = "20260930_calendar_binding"
 CONSTRAINT_NAME = "ex_appointments_resource_time"
 LOCK_TIMEOUT = "8s"
 STATEMENT_TIMEOUT = "12s"
-WAIT_OBSERVATION_TIMEOUT_SECONDS = 6.0
+STARTUP_TIMEOUT_SECONDS = 8.0
+LOCK_OBSERVATION_TIMEOUT_SECONDS = 2.0
+WORKER_COMPLETION_TIMEOUT_SECONDS = 15.0
 UTC = timezone.utc
 
 
@@ -69,6 +71,17 @@ class CreatedIds:
             ("audit_log", self.audit_logs),
         )
         return [f"{kind}:{value}" for kind, values in groups for value in sorted(values, key=str)]
+
+
+@dataclass
+class CompetingInsertState:
+    """Thread-safe-by-event handoff of safe facts about transaction B."""
+
+    session_identity: int | None = None
+    backend_pid: int | None = None
+    result: str = "unexpected_error"
+    sqlstate_matches: bool = False
+    constraint_matches: bool = False
 
 
 def set_timeouts(db: Any) -> None:
@@ -162,68 +175,115 @@ def resolver_provider(db: Any, tenant: Tenant, contact: Contact, calendar: Nativ
     )
 
 
-def competing_insert(row: Appointment, pid_queue: Queue[int]) -> str:
+def competing_insert(
+    row: Appointment,
+    state: CompetingInsertState,
+    b_ready: Event,
+    b_attempting: Event,
+    b_finished: Event,
+) -> None:
     """Insert on a genuinely independent session and report only safe outcomes."""
     with SessionLocal() as db:
+        state.session_identity = id(db)
         try:
             set_timeouts(db)
-            pid_queue.put(db.scalar(text("SELECT pg_backend_pid()")))
+            state.backend_pid = db.scalar(text("SELECT pg_backend_pid()"))
+            b_ready.set()
             db.add(row)
+            # This event deliberately describes the attempt, not a PostgreSQL
+            # lock.  flush() is the next operation in this worker.
+            b_attempting.set()
             db.flush()  # Expected to wait on transaction A's speculative GiST conflict.
             db.commit()
-            return "commit"
+            state.result = "commit"
         except IntegrityError as exc:
             db.rollback()
             original = exc.orig
             sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
             constraint = getattr(getattr(original, "diag", None), "constraint_name", None)
-            return "conflict" if sqlstate == "23P01" and constraint == CONSTRAINT_NAME else "unexpected_integrity"
+            state.sqlstate_matches = sqlstate == "23P01"
+            state.constraint_matches = constraint == CONSTRAINT_NAME
+            state.result = "conflict" if state.sqlstate_matches and state.constraint_matches else "unexpected_integrity"
         except Exception:
             db.rollback()
-            return "unexpected_error"
+            state.result = "unexpected_error"
+        finally:
+            # Also release startup waiters when connection acquisition or the
+            # initial transaction statement failed before a PID was available.
+            b_ready.set()
+            b_finished.set()
+
+
+def observe_lock_wait(tx_a: Any, pid_b: int) -> str:
+    """Return optional lock evidence without making observability part of the gate."""
+    deadline = time.monotonic() + LOCK_OBSERVATION_TIMEOUT_SECONDS
+    saw_backend = False
+    try:
+        while time.monotonic() < deadline:
+            activity = tx_a.execute(
+                text("SELECT pid, wait_event_type FROM pg_stat_activity WHERE pid = :pid"), {"pid": pid_b}
+            ).one_or_none()
+            if activity is None:
+                time.sleep(0.05)
+                continue
+            saw_backend = True
+            wait_type = activity.wait_event_type
+            if wait_type == "Lock":
+                return "PASS"
+            time.sleep(0.05)
+    except Exception:
+        return "UNAVAILABLE"
+    return "NOT OBSERVED" if saw_backend else "UNAVAILABLE"
 
 
 def concurrency_gate(
     ids: CreatedIds, tenant: Tenant, contact: Contact, calendar: NativeCalendar, resource: CalendarResource
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, str]:
     start = datetime(2035, 1, 8, 9, 0, tzinfo=UTC)
     end = datetime(2035, 1, 8, 9, 30, tzinfo=UTC)
     row_a = appointment(ids, tenant_id=tenant.id, calendar_id=calendar.id, resource_id=resource.id,
                         contact_id=contact.id, start=start, end=end)
     row_b = appointment(ids, tenant_id=tenant.id, calendar_id=calendar.id, resource_id=resource.id,
                         contact_id=contact.id, start=start, end=end)
-    pid_queue: Queue[int] = Queue(maxsize=1)
+    state_b = CompetingInsertState()
+    b_ready = Event()
+    b_attempting = Event()
+    b_finished = Event()
     result_a = "unexpected_error"
     result_b = "unexpected_error"
     with SessionLocal() as tx_a:
         set_timeouts(tx_a)
+        pid_a = tx_a.scalar(text("SELECT pg_backend_pid()"))
         tx_a.add(row_a)
         tx_a.flush()
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="wazza-pg-gate") as executor:
-            future = executor.submit(competing_insert, row_b, pid_queue)
-            try:
-                pid_b = pid_queue.get(timeout=2.0)
-            except Exception as exc:
+            future = executor.submit(competing_insert, row_b, state_b, b_ready, b_attempting, b_finished)
+            if not b_ready.wait(timeout=STARTUP_TIMEOUT_SECONDS) or state_b.backend_pid is None:
                 tx_a.rollback()
-                raise GateFailure("Independent transaction did not start in time.") from exc
-            deadline = time.monotonic() + WAIT_OBSERVATION_TIMEOUT_SECONDS
-            observed_lock = False
-            while time.monotonic() < deadline:
-                with engine.connect() as observer:
-                    wait_type = observer.execute(
-                        text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"), {"pid": pid_b}
-                    ).scalar_one_or_none()
-                if wait_type == "Lock":
-                    observed_lock = True
-                    break
-                time.sleep(0.05)
-            if not observed_lock:
+                b_finished.wait(timeout=WORKER_COMPLETION_TIMEOUT_SECONDS)
+                raise GateFailure("Independent transaction did not acquire a connection in time.")
+            independent_sessions = state_b.session_identity != id(tx_a)
+            independent_pids = state_b.backend_pid != pid_a
+            if not independent_sessions or not independent_pids:
                 tx_a.rollback()
-                result_b = future.result(timeout=15.0)
-                raise GateFailure(f"PostgreSQL lock wait was not observed (TX B: {result_b}).")
+                b_finished.wait(timeout=WORKER_COMPLETION_TIMEOUT_SECONDS)
+                raise GateFailure("Transactions A and B did not use independent PostgreSQL connections.")
+            if not b_attempting.wait(timeout=STARTUP_TIMEOUT_SECONDS):
+                tx_a.rollback()
+                b_finished.wait(timeout=WORKER_COMPLETION_TIMEOUT_SECONDS)
+                raise GateFailure("Transaction B did not attempt its conflicting INSERT in time.")
+            lock_observation = observe_lock_wait(tx_a, state_b.backend_pid)
             tx_a.commit()
             result_a = "commit"
-            result_b = future.result(timeout=15.0)
+            if not b_finished.wait(timeout=WORKER_COMPLETION_TIMEOUT_SECONDS):
+                raise GateFailure("Transaction B did not finish in time.")
+            future.result(timeout=0)
+            result_b = state_b.result
+
+    if not state_b.sqlstate_matches:
+        raise GateFailure("Transaction B did not return PostgreSQL SQLSTATE 23P01.")
+    if not state_b.constraint_matches:
+        raise GateFailure("Transaction B did not identify the expected exclusion constraint.")
 
     winners = int(result_a == "commit") + int(result_b == "commit")
     conflicts = int(result_a == "conflict") + int(result_b == "conflict")
@@ -239,7 +299,7 @@ def concurrency_gate(
         )
     if (winners, conflicts, active) != (1, 1, 1):
         raise GateFailure(f"Concurrency invariant failed (TX A: {result_a}; TX B: {result_b}).")
-    return winners, conflicts, int(active)
+    return winners, conflicts, int(active), lock_observation
 
 
 def cleanup(ids: CreatedIds) -> bool:
@@ -314,9 +374,16 @@ def run() -> int:
             setup.add_all((resource_a2, rule))
             setup.commit()
 
-        winners, conflicts, active = concurrency_gate(ids, tenant_a, contact_a, calendar_a, resource_a)
-        print("Concurrency:\nindependent transactions: PASS")
-        print("TX A: PASS / COMMIT\nTX B: CONFLICT")
+        winners, conflicts, active, lock_observation = concurrency_gate(
+            ids, tenant_a, contact_a, calendar_a, resource_a
+        )
+        print("Concurrency:\nindependent sessions: PASS")
+        print("independent backend PIDs: PASS")
+        print("B attempted conflicting INSERT: PASS")
+        print(f"lock observation: {lock_observation}")
+        print("A commit: PASS")
+        print("B SQLSTATE 23P01: PASS")
+        print("constraint name matches: PASS")
         print(f"winner count: {winners}\nconflict count: {conflicts}\nactive overlapping appointments: {active}\n")
 
         with SessionLocal() as db:
