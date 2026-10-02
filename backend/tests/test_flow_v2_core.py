@@ -17,6 +17,8 @@ from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
 from app.flow_v2.transition_resolver import FlowV2TransitionError
 from app.flow_v2.executors.base_executor import NodeExecutionResult
+from app.schemas.assistant_configuration import AssistantConfigurationV1
+from app.services.assistant_materialization_service import build_candidate_graph
 from app.tools.base import ToolResult
 
 
@@ -456,6 +458,65 @@ def test_fixed_choice_saves_option_value_without_changing_handle_routing() -> No
     assert any(
         event["event_type"] == "TRANSITION_SELECTED"
         and event["payload"]["source_handle"] == "avaliacao-handle"
+        for event in events.events
+    )
+
+
+def test_materialized_service_preserves_template_handle_and_routes_to_appointment_period() -> None:
+    template_nodes = [
+        {"id": "choice", "type": "choice", "data": {
+            "isStart": True,
+            "template_node_key": "service_choice",
+            "content": "Escolha o serviço",
+            "result_variable": "appointment_type",
+            "options": [{
+                "id": "legacy-consulta", "label": "Consulta", "value": "consulta",
+                "source_handle": "route-to-period",
+            }],
+        }},
+        {"id": "appointment_period", "type": "data_collection", "data": {
+            "content": "Qual período?", "variable_name": "appointment_period",
+            "data_type": "appointment_period",
+        }},
+    ]
+    edges = [{
+        "id": "service-period", "source": "choice", "sourceHandle": "route-to-period",
+        "target": "appointment_period",
+    }]
+    configuration = AssistantConfigurationV1.model_validate({
+        "schema_version": 1,
+        "clinic_name": "Clínica",
+        "services": [{"id": "consulta", "label": "Consulta", "duration_minutes": 30}],
+        "google_calendar_connection_id": str(uuid.uuid4()),
+        "handoff": {"enabled": True, "reason": "Atendimento humano"},
+    })
+    nodes, materialized_edges, _ = build_candidate_graph(
+        template_nodes, edges, configuration,
+        [{"parameter": "services", "node_key": "service_choice", "field": "data.options"}],
+        source_nodes=template_nodes,
+    )
+    option = nodes[0]["data"]["options"][0]
+    assert option == {
+        "id": "consulta", "label": "Consulta", "value": "consulta",
+        "source_handle": "route-to-period",
+    }
+
+    executor, snapshot, events, session, db = _executor({
+        "schema_version": 1, "start_node_id": "choice", "nodes": nodes, "edges": materialized_edges,
+    })
+    session.current_node_id = "choice"
+    executor.handle_input(db, _input_with_id(snapshot, "materialized-service-initial"))
+    executor.handle_input(
+        db, _input_with_id(snapshot, "materialized-service-selected", {"row_id": "consulta"}),
+    )
+
+    assert session.variables["appointment_type"] == "consulta"
+    assert session.current_node_id == "appointment_period"
+    assert any(
+        event["event_type"] == "TRANSITION_SELECTED"
+        and event["payload"] == {
+            "source_handle": "route-to-period", "target_node_id": "appointment_period",
+        }
         for event in events.events
     )
 
