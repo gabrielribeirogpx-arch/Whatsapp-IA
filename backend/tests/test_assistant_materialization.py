@@ -69,6 +69,43 @@ def test_provider_agnostic_binding_reference_is_materialized_server_side():
     assert candidate[2]["data"]["connection_id"] == f"assistant_calendar:{binding_id}"
 
 
+def test_service_handles_are_correlated_by_id_then_value_then_unambiguous_label():
+    nodes, edges = graph()
+    source_nodes = deepcopy(nodes)
+    source_nodes[1]["data"]["options"] = [
+        {"id": "consulta", "label": "Antiga", "value": "outro", "sourceHandle": "by-id"},
+        {"id": "legacy-avaliacao", "label": "Antiga", "value": "avaliacao", "source_handle": "by-value"},
+    ]
+
+    candidate, _, _ = build_candidate_graph(
+        nodes, edges, configuration(), [TARGETS[1]], source_nodes=source_nodes,
+    )
+
+    assert candidate[1]["data"]["options"] == [
+        {"id": "consulta", "label": "Consulta", "value": "consulta", "sourceHandle": "by-id"},
+        {"id": "avaliacao", "label": "Avaliação", "value": "avaliacao", "source_handle": "by-value"},
+    ]
+
+
+def test_service_materialization_does_not_invent_handle_for_ambiguous_label():
+    nodes, edges = graph()
+    source_nodes = deepcopy(nodes)
+    source_nodes[1]["data"]["options"] = [
+        {"id": "old-1", "label": "Consulta", "source_handle": "first"},
+        {"id": "old-2", "label": "Consulta", "source_handle": "second"},
+    ]
+    configured = configuration()
+    configured.services = [configured.services[0]]
+
+    candidate, _, _ = build_candidate_graph(
+        nodes, edges, configured, [TARGETS[1]], source_nodes=source_nodes,
+    )
+
+    assert candidate[1]["data"]["options"] == [
+        {"id": "consulta", "label": "Consulta", "value": "consulta"},
+    ]
+
+
 def test_clinic_name_interpolation_preserves_surrounding_message_and_is_idempotent():
     nodes, edges = graph()
     nodes[0]["data"]["message"] = "Olá! Bem-vindo à {{clinic_name}}. Como posso ajudar?"

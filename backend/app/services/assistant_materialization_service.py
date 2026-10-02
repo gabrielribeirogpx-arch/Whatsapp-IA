@@ -42,6 +42,33 @@ DEFAULT_OPERATION = "replace"
 ALLOWED_OPERATIONS = {DEFAULT_OPERATION, "interpolate"}
 
 
+def _materialized_services(
+    configuration: AssistantConfigurationV1, source_node: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Keep configured identities while carrying forward template routing handles."""
+    source_data = source_node.get("data") if isinstance(source_node.get("data"), dict) else {}
+    source_options = source_data.get("options")
+    historical = [option for option in source_options if isinstance(option, dict)] if isinstance(source_options, list) else []
+
+    def unique_match(key: str, value: str) -> dict[str, Any] | None:
+        matches = [option for option in historical if option.get(key) == value]
+        return matches[0] if len(matches) == 1 else None
+
+    materialized: list[dict[str, str]] = []
+    for service in configuration.services:
+        option = {"id": service.id, "label": service.label, "value": service.id}
+        original = unique_match("id", service.id) or unique_match("value", service.id)
+        if original is None:
+            original = unique_match("label", service.label)
+        if original is not None:
+            for handle_key in ("source_handle", "sourceHandle"):
+                handle = original.get(handle_key)
+                if isinstance(handle, str) and handle:
+                    option[handle_key] = handle
+        materialized.append(option)
+    return materialized
+
+
 def _uuid(value: object) -> UUID | None:
     try:
         return UUID(str(value))
@@ -120,7 +147,6 @@ def build_candidate_graph(
     values = {
         "clinic_name": configuration.clinic_name,
         # duration_minutes deliberately remains solely in canonical configuration.
-        "services": [{"id": service.id, "label": service.label, "value": service.id} for service in configuration.services],
         "google_calendar_connection_id": calendar_connection_reference or f"integration:{configuration.google_calendar_connection_id}",
         # enabled is intentionally not represented: V1 never removes graph structure.
         "handoff.reason": configuration.handoff.reason,
@@ -129,7 +155,11 @@ def build_candidate_graph(
     for node, source_node, target in resolved:
         field_name = target["field"].split(".", 1)[1]
         data = node["data"]
-        value = copy.deepcopy(values[target["parameter"]])
+        value = (
+            _materialized_services(configuration, source_node)
+            if target["parameter"] == "services"
+            else copy.deepcopy(values[target["parameter"]])
+        )
         if target.get("operation", DEFAULT_OPERATION) == "interpolate":
             source_data = source_node.get("data") if isinstance(source_node.get("data"), dict) else {}
             source_value = source_data.get(field_name)

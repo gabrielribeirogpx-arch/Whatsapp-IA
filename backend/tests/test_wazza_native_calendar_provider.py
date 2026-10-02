@@ -22,6 +22,7 @@ from app.services.calendar_provider_resolver import CalendarProviderResolver
 from app.services.native_calendar_service import NativeCalendarService
 from app.services.wazza_native_calendar_provider import WazzaNativeCalendarProvider
 from app.tools.context import ToolContext
+from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter
 
 
 @compiles(UUID, "sqlite")
@@ -161,3 +162,41 @@ def test_resolver_returns_protocol_native_provider_from_server_binding(setup):
     ))
     assert isinstance(resolved, WazzaNativeCalendarProvider)
     assert isinstance(resolved, CalendarProvider)
+
+
+def test_historical_availability_tool_uses_native_binding_and_server_duration(setup, monkeypatch):
+    db, tenant, contact, other, service, calendar, resource, provider = setup
+    rule(service, calendar, resource)
+    monkeypatch.setattr(
+        "app.services.appointment_policy_service.policy_for_tenant",
+        lambda _db, _tenant_id: {"default_duration_minutes": 60},
+    )
+    def resolve_duration(_db, **kwargs):
+        assert kwargs["runtime_variables"] == {"appointment_type": "consulta"}
+        return type("Duration", (), {
+            "duration_minutes": 30, "source": "assistant_configuration", "service_id": "consulta",
+        })()
+
+    monkeypatch.setattr(
+        "app.services.appointment_duration_service.resolve_effective_appointment_duration",
+        resolve_duration,
+    )
+    context = ToolContext(
+        tenant_id=tenant.id,
+        contact_id=contact.id,
+        calendar_provider="wazza_native",
+        native_calendar_id=calendar.id,
+        native_resource_id=resource.id,
+        runtime_variables={"appointment_type": "consulta"},
+    )
+
+    result = GoogleCalendarToolAdapter(db).execute(
+        "google_calendar_check_availability",
+        {"start": dt(5, 8), "end": dt(5, 10), "mode": "period"},
+        context,
+    )
+
+    assert context.integration_connection_id is None
+    assert result.tool_id == "google_calendar_check_availability"
+    assert result.ok is True
+    assert len(result.output["appointments"]) == 2
