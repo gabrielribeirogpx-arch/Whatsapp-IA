@@ -22,6 +22,7 @@ from app.services.calendar_provider_resolver import CalendarProviderResolver
 from app.services.native_calendar_service import NativeCalendarService
 from app.services.wazza_native_calendar_provider import WazzaNativeCalendarProvider
 from app.tools.context import ToolContext
+from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter
 
 
 @compiles(UUID, "sqlite")
@@ -161,3 +162,32 @@ def test_resolver_returns_protocol_native_provider_from_server_binding(setup):
     ))
     assert isinstance(resolved, WazzaNativeCalendarProvider)
     assert isinstance(resolved, CalendarProvider)
+
+
+def test_historical_google_availability_tool_uses_trusted_native_binding(setup, monkeypatch):
+    db, tenant, contact, other, service, calendar, resource, provider = setup
+    rule(service, calendar, resource)
+    monkeypatch.setattr(
+        "app.services.appointment_duration_service.resolve_effective_appointment_duration",
+        lambda *_args, **_kwargs: type("Duration", (), {
+            "source": "assistant_configuration", "service_id": "consulta", "duration_minutes": 30,
+        })(),
+    )
+    monkeypatch.setattr(
+        "app.services.appointment_policy_service.policy_for_tenant",
+        lambda *_args, **_kwargs: {"default_duration_minutes": 60},
+    )
+
+    result = GoogleCalendarToolAdapter(db).execute(
+        "google_calendar_check_availability",
+        {"start": dt(5, 8), "end": dt(5, 9), "timezone": "America/Sao_Paulo"},
+        ToolContext(
+            tenant_id=tenant.id, contact_id=contact.id,
+            calendar_provider="wazza_native", native_calendar_id=calendar.id,
+            native_resource_id=resource.id,
+            runtime_variables={"appointment_type": "consulta"},
+        ),
+    )
+
+    assert result.ok is True
+    assert result.output["appointments"][0]["end"].endswith("08:30:00-03:00")

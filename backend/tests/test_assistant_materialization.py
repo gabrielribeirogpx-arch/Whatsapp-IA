@@ -69,6 +69,27 @@ def test_provider_agnostic_binding_reference_is_materialized_server_side():
     assert candidate[2]["data"]["connection_id"] == f"assistant_calendar:{binding_id}"
 
 
+def test_service_materialization_preserves_historical_choice_routing_handle():
+    nodes, edges = graph()
+    nodes[1]["data"]["options"] = [{
+        "id": "legacy-template-option", "label": "Consulta", "value": "Consulta",
+        "source_handle": "legacy-consulta-edge",
+    }]
+    edges.append({
+        "id": "service-next", "source": "2", "sourceHandle": "legacy-consulta-edge",
+        "target": "appointment-period",
+    })
+    configured = configuration().model_copy(update={"services": [configuration().services[0]]})
+
+    candidate, candidate_edges, _ = build_candidate_graph(nodes, edges, configured, TARGETS)
+
+    assert candidate[1]["data"]["options"] == [{
+        "id": "consulta", "label": "Consulta", "value": "consulta",
+        "source_handle": "legacy-consulta-edge",
+    }]
+    assert candidate_edges[-1]["sourceHandle"] == candidate[1]["data"]["options"][0]["source_handle"]
+
+
 def test_clinic_name_interpolation_preserves_surrounding_message_and_is_idempotent():
     nodes, edges = graph()
     nodes[0]["data"]["message"] = "Olá! Bem-vindo à {{clinic_name}}. Como posso ajudar?"

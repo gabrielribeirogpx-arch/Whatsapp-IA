@@ -42,6 +42,41 @@ DEFAULT_OPERATION = "replace"
 ALLOWED_OPERATIONS = {DEFAULT_OPERATION, "interpolate"}
 
 
+def _materialized_services(configuration: AssistantConfigurationV1, source_node: dict[str, Any]) -> list[dict[str, str]]:
+    """Keep the template's routing identity while replacing service content.
+
+    A fixed Choice routes with its option ``source_handle`` (falling back to
+    its id).  Service ids belong to the assistant configuration and therefore
+    need not equal the historical handles stored in the template's edges.
+    """
+    source_data = source_node.get("data") if isinstance(source_node.get("data"), dict) else {}
+    source_options = source_node.get("options") or source_data.get("options") or []
+    result: list[dict[str, str]] = []
+    for service in configuration.services:
+        option = {"id": service.id, "label": service.label, "value": service.id}
+        matches = [
+            candidate for candidate in source_options
+            if isinstance(candidate, dict) and service.id in {
+                str(candidate.get("id") or ""), str(candidate.get("value") or "")
+            }
+        ]
+        if not matches:
+            matches = [
+                candidate for candidate in source_options
+                if isinstance(candidate, dict)
+                and str(candidate.get("label") or "").strip().casefold() == service.label.strip().casefold()
+            ]
+        if len(matches) == 1:
+            source_handle = next((
+                str(matches[0][key]) for key in ("source_handle", "sourceHandle", "handleId", "handle_id")
+                if matches[0].get(key) not in (None, "")
+            ), str(matches[0].get("id") or ""))
+            if source_handle:
+                option["source_handle"] = source_handle
+        result.append(option)
+    return result
+
+
 def _uuid(value: object) -> UUID | None:
     try:
         return UUID(str(value))
@@ -119,8 +154,6 @@ def build_candidate_graph(
 
     values = {
         "clinic_name": configuration.clinic_name,
-        # duration_minutes deliberately remains solely in canonical configuration.
-        "services": [{"id": service.id, "label": service.label, "value": service.id} for service in configuration.services],
         "google_calendar_connection_id": calendar_connection_reference or f"integration:{configuration.google_calendar_connection_id}",
         # enabled is intentionally not represented: V1 never removes graph structure.
         "handoff.reason": configuration.handoff.reason,
@@ -129,7 +162,11 @@ def build_candidate_graph(
     for node, source_node, target in resolved:
         field_name = target["field"].split(".", 1)[1]
         data = node["data"]
-        value = copy.deepcopy(values[target["parameter"]])
+        value = (
+            _materialized_services(configuration, source_node)
+            if target["parameter"] == "services"
+            else copy.deepcopy(values[target["parameter"]])
+        )
         if target.get("operation", DEFAULT_OPERATION) == "interpolate":
             source_data = source_node.get("data") if isinstance(source_node.get("data"), dict) else {}
             source_value = source_data.get(field_name)
