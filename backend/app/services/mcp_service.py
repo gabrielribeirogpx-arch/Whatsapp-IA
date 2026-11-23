@@ -19,6 +19,7 @@ from app.services.execution_budget_service import ExecutionBudget, ExecutionBudg
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.observability import TraceContext, TraceEventType, record_event
 from app.services.google_calendar_service import GoogleCalendarService
+from app.services.mcp_customer_identity import McpCustomerIdentity, signed_customer_headers
 
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSPORTS = {"http", "sse", "stdio_future"}
@@ -166,13 +167,29 @@ def delete_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, *
         db.commit()
 
 
-def _headers(server: TenantMCPServer) -> dict[str, str]:
+def _headers(
+    server: TenantMCPServer,
+    *,
+    customer_identity: McpCustomerIdentity | None = None,
+    request_id: str | None = None,
+) -> dict[str, str]:
     config = _decrypt_config(server.encrypted_config)
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if config.get("bearer_token"):
         headers["Authorization"] = f"Bearer {config['bearer_token']}"
     if config.get("api_key"):
         headers["X-API-Key"] = str(config["api_key"])
+    if customer_identity is not None:
+        bearer_token = str(config.get("bearer_token") or "")
+        if not bearer_token or not request_id:
+            raise MCPError("Identidade do cliente exige uma credencial Bearer MCP.")
+        headers.update(
+            signed_customer_headers(
+                bearer_token=bearer_token,
+                identity=customer_identity,
+                request_id=request_id,
+            )
+        )
     return headers
 
 
@@ -237,7 +254,15 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, 
     return saved
 
 
-def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, arguments: dict[str, Any] | None, timeout_seconds: int = MAX_TIMEOUT_SECONDS, budget: ExecutionBudget | None = None) -> dict[str, Any]:
+def call_mcp_tool(
+    db: Session,
+    tenant_id: uuid.UUID,
+    tool_id: uuid.UUID | str,
+    arguments: dict[str, Any] | None,
+    timeout_seconds: int = MAX_TIMEOUT_SECONDS,
+    budget: ExecutionBudget | None = None,
+    customer_identity: McpCustomerIdentity | None = None,
+) -> dict[str, Any]:
     started = time.monotonic()
     trace = TraceContext(tenant_id=str(tenant_id))
     # Arguments can contain clinical/contact data. Observability records only
@@ -268,14 +293,20 @@ def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, a
         if remaining <= 250:
             return {"ok": False, "status": "budget_exceeded", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": "deadline_exceeded", **budget.safe_metadata()}
         timeout = max(1, min(timeout, remaining // 1000))
-    payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "tools/call", "params": {"name": tool.tool_name, "arguments": args}}
+    request_id = str(uuid.uuid4())
+    payload = {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {"name": tool.tool_name, "arguments": args}}
     circuit_key = f"mcp:{tenant_id}:{server.id}"
     try:
         cb_meta = check_circuit(circuit_key)
     except CircuitBreakerOpen:
         return {"ok": False, "status": "circuit_open", "message": "Integração temporariamente indisponível.", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": "circuit_open"}
     try:
-        response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=timeout)
+        response = requests.post(
+            str(server.server_url),
+            headers=_headers(server, customer_identity=customer_identity, request_id=request_id),
+            json=payload,
+            timeout=timeout,
+        )
         response.raise_for_status()
         record_success(circuit_key)
         raw = response.json()

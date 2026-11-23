@@ -2335,7 +2335,21 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             return execute_subflow_tool(session.tenant_id, flow_id, session.id, node_id, tool_config, tool_input, runtime_input, db, budget=budget)
         def _execute_agent_mcp_tool(tool_config, tool_input):
             from app.services.mcp_service import call_mcp_tool
-            return call_mcp_tool(db, session.tenant_id, str(tool_config.get("tool_id")), tool_input, timeout_seconds=15, budget=budget)
+            from app.services.mcp_customer_identity import customer_identity_from_runtime
+
+            identity = customer_identity_from_runtime(
+                runtime_input.external_user_id,
+                runtime_input.conversation_id,
+            )
+            return call_mcp_tool(
+                db,
+                session.tenant_id,
+                str(tool_config.get("tool_id")),
+                tool_input,
+                timeout_seconds=15,
+                budget=budget,
+                customer_identity=identity,
+            )
         result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "mcp_tools": mcp_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None, mcp_tool_executor=_execute_agent_mcp_tool if allow_mcp_tools else None, budget=budget)
         persist_budget(runtime_input.metadata, budget)
         actions: list[RuntimeAction] = []

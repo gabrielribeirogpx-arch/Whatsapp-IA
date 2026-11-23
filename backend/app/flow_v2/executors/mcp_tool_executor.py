@@ -249,7 +249,20 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos não correspondem ao schema da ferramenta.") from exc
             for attempt in range(1, max_attempts + 1):
                 logger.info("event=RUNTIME_V2_MCP_TOOL_START tenant_id=%s flow_id=%s session_id=%s node_id=%s connection_id=%s server_name=%s tool_name=%s attempt=%s timeout_seconds=%s", session.tenant_id, getattr(snapshot, "flow_id", None), session.id, node_id, server.id, server.name, tool.tool_name, attempt, timeout)
-                response = call_mcp_tool(db, session.tenant_id, tool.id, arguments, timeout_seconds=timeout)
+                from app.services.mcp_customer_identity import customer_identity_from_runtime
+
+                identity = customer_identity_from_runtime(
+                    runtime_input.external_user_id,
+                    runtime_input.conversation_id,
+                )
+                response = call_mcp_tool(
+                    db,
+                    session.tenant_id,
+                    tool.id,
+                    arguments,
+                    timeout_seconds=timeout,
+                    customer_identity=identity,
+                )
                 if response.get("status") == "timeout":
                     if attempt < max_attempts:
                         time.sleep(min(max(int(retry.get("backoff_ms") or 1000), 0), 10_000) / 1000)
